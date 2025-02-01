@@ -28,7 +28,7 @@ class TopicSelector:
         # Define common topic groups to ensure overlap
         self.topic_groups = {
             "group1": ["Weather", "Sports"],
-            "group2": ["News", "Technology"],
+            "group2": ["News", "Technology", "Science", "Sports"],
             "group3": ["Stock", "Healthcare"],
             "group4": ["Traffic", "Entertainment"]
         }

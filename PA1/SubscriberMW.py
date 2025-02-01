@@ -10,7 +10,7 @@ import time
 import logging
 import zmq
 import configparser
-from CS6381_MW import discovery_pb2
+from CS6381_MW import discovery_pb2, topic_pb2
 
 
 class SubscriberMW:
@@ -143,18 +143,44 @@ class SubscriberMW:
         except Exception as e:
             raise e
 
+    # def handle_publication(self):
+    #     try:
+    #         self.logger.info("SubscriberMW::handle_publication")
+
+    #         # Receive publication
+    #         data = self.sub.recv_string()
+
+    #         # Parse topic and value (assuming "topic:value" format)
+    #         topic, value = data.split(":", 1)
+
+    #         # Let application handle the data
+    #         timeout = self.upcall_obj.handle_publication(topic, value)
+
+    #         return timeout
+
+    #     except Exception as e:
+    #         raise e
+
+
     def handle_publication(self):
         try:
             self.logger.info("SubscriberMW::handle_publication")
 
-            # Receive publication
-            data = self.sub.recv_string()
+            # Receive the serialized message
+            msg_bytes = self.sub.recv()
 
-            # Parse topic and value (assuming "topic:value" format)
-            topic, value = data.split(":", 1)
+            # Deserialize using protobuf
+            pub_msg = topic_pb2.Publication()
+            pub_msg.ParseFromString(msg_bytes)
 
-            # Let application handle the data
-            timeout = self.upcall_obj.handle_publication(topic, value)
+            # Log the message with timestamps (for debugging)
+            send_time = pub_msg.timestamp
+            recv_time = int(time.time() * 1000)
+            latency = recv_time - send_time
+            self.logger.debug(f"Received publication on topic {pub_msg.topic}, latency: {latency} ms")
+
+            # Pass topic and data to the upcall
+            timeout = self.upcall_obj.handle_publication(pub_msg.topic, pub_msg.data)
 
             return timeout
 

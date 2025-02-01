@@ -10,7 +10,7 @@ import time
 import logging
 import zmq
 import configparser
-from CS6381_MW import discovery_pb2
+from CS6381_MW import discovery_pb2, topic_pb2
 
 class PublisherMW:
     def __init__(self, logger):
@@ -156,13 +156,21 @@ class PublisherMW:
         try:
             self.logger.debug("PublisherMW::disseminate")
 
-            # For now, simply format as "topic:data"
-            # In future, use protobuf for more complex data
-            send_str = f"{topic}:{data}"
-            self.logger.debug(f"PublisherMW::disseminate - {send_str}")
+            pub_msg = topic_pb2.Publication()
+            pub_msg.publisher_id = id
+            pub_msg.topic = topic
+            pub_msg.data = data
+            pub_msg.timestamp = int(time.time() * 1000) # Time in milliseconds
 
-            # Send as bytes with utf-8 encoding
-            self.pub.send(bytes(send_str, "utf-8"))
+            buf2send = pub_msg.SerializeToString()
+            self.pub.send(buf2send)
+            # # For now, simply format as "topic:data"
+            # # In future, use protobuf for more complex data
+            # send_str = f"{topic}:{data}"
+            # self.logger.debug(f"PublisherMW::disseminate - {send_str}")
+
+            # # Send as bytes with utf-8 encoding
+            # self.pub.send(bytes(send_str, "utf-8"))
 
         except Exception as e:
             raise e
