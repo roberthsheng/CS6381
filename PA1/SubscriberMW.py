@@ -12,6 +12,7 @@ import zmq
 import configparser
 from CS6381_MW import discovery_pb2
 
+
 class SubscriberMW:
     def __init__(self, logger):
         self.logger = logger
@@ -175,7 +176,9 @@ class SubscriberMW:
                     # Access fields through protobuf getters
                     connect_str = f"tcp://{pub.addr}:{pub.port}"
                     self.sub.connect(connect_str)
-                    self.logger.debug(f"Connected to publisher {pub.id} at {connect_str}")
+                    self.logger.debug(
+                        f"Connected to publisher {pub.id} at {connect_str}"
+                    )
 
                 # Subscribe to all topics
                 for topic in topics:
@@ -195,7 +198,9 @@ class SubscriberMW:
             else:
                 raise ValueError(f"Unknown dissemination strategy: {dissemination}")
 
-            self.logger.info("Successfully connected to publishers and subscribed to topics")
+            self.logger.info(
+                "Successfully connected to publishers and subscribed to topics"
+            )
 
         except Exception as e:
             self.logger.error(f"Error in connect_to_publishers: {str(e)}")

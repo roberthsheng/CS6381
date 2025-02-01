@@ -14,6 +14,7 @@ from SubscriberMW import SubscriberMW
 from CS6381_MW import discovery_pb2
 from topic_selector import TopicSelector
 
+
 class SubscriberAppln:
     class State(Enum):
         INITIALIZE = 0
@@ -39,11 +40,13 @@ class SubscriberAppln:
 
             self.state = self.State.CONFIGURE
             self.name = args.name
-            
+
             # Initialize topic selector and get topics
             ts = TopicSelector()
             self.topiclist = ts.interest(args.num_topics)
-            self.logger.info(f"SubscriberAppln::configure - Selected topics: {self.topiclist}")
+            self.logger.info(
+                f"SubscriberAppln::configure - Selected topics: {self.topiclist}"
+            )
 
             # Initialize the middleware
             self.mw_obj = SubscriberMW(self.logger)
@@ -65,10 +68,10 @@ class SubscriberAppln:
 
             # Set up middleware upcall handle
             self.mw_obj.set_upcall_handle(self)
-            
+
             # Start in REGISTER state
             self.state = self.State.REGISTER
-            
+
             # Enter event loop
             self.logger.debug("SubscriberAppln::driver - Entering event loop")
             self.mw_obj.event_loop(timeout=0)
@@ -91,7 +94,9 @@ class SubscriberAppln:
 
             elif self.state == self.State.LOOKUP:
                 # Lookup publishers
-                self.logger.debug("SubscriberAppln::invoke_operation - Looking up publishers")
+                self.logger.debug(
+                    "SubscriberAppln::invoke_operation - Looking up publishers"
+                )
                 self.lookup_attempts += 1
                 self.mw_obj.lookup_publishers(self.topiclist)
                 return None
@@ -113,7 +118,9 @@ class SubscriberAppln:
 
             if register_resp.status == discovery_pb2.STATUS_SUCCESS:
                 # Move to lookup state
-                self.logger.debug("SubscriberAppln::register_response - Registration successful")
+                self.logger.debug(
+                    "SubscriberAppln::register_response - Registration successful"
+                )
                 self.state = self.State.LOOKUP
                 return 0
             else:
@@ -128,20 +135,26 @@ class SubscriberAppln:
             self.logger.info("SubscriberAppln::lookup_response")
 
             # Check if we received any publishers
-            if not hasattr(lookup_resp, 'publishers') or not lookup_resp.publishers:
+            if not hasattr(lookup_resp, "publishers") or not lookup_resp.publishers:
                 self.logger.debug("No publishers found in response")
-                
+
                 # Check if we should retry
                 if self.lookup_attempts < self.max_lookup_attempts:
-                    self.logger.info(f"Retry {self.lookup_attempts}/{self.max_lookup_attempts}")
+                    self.logger.info(
+                        f"Retry {self.lookup_attempts}/{self.max_lookup_attempts}"
+                    )
                     time.sleep(1)  # Wait before retry
                     return 0  # Will trigger another lookup
                 else:
-                    self.logger.warning("Max lookup attempts reached - continuing without publishers")
-            
+                    self.logger.warning(
+                        "Max lookup attempts reached - continuing without publishers"
+                    )
+
             # Connect to the publishers we received
-            self.mw_obj.connect_to_publishers(list(lookup_resp.publishers), self.topiclist)
-            
+            self.mw_obj.connect_to_publishers(
+                list(lookup_resp.publishers), self.topiclist
+            )
+
             # Move to listening state
             self.state = self.State.LISTENING
             return 0
@@ -153,17 +166,17 @@ class SubscriberAppln:
     def handle_publication(self, topic, value):
         try:
             self.logger.info(f"SubscriberAppln::handle_publication - {topic}: {value}")
-            
+
             # Increment received count for this topic
             if topic in self.received_publications:
                 self.received_publications[topic] += 1
-                
+
             # Here you might want to:
             # - Record timestamps for latency measurements
             # - Store data for analytics
             # - Process the value based on topic
             # - Check for experiment completion
-            
+
             return 0  # Keep listening
 
         except Exception as e:
@@ -173,40 +186,53 @@ class SubscriberAppln:
     def cleanup(self):
         try:
             self.logger.info("SubscriberAppln::cleanup")
-            
+
             # Print final statistics
             self.logger.info("Publication statistics:")
             for topic, count in self.received_publications.items():
                 self.logger.info(f"  {topic}: {count} publications received")
-            
+
             # Cleanup middleware
             if self.mw_obj:
                 self.mw_obj.cleanup()
-                
+
             self.state = self.State.COMPLETED
-            
+
         except Exception as e:
             self.logger.error(f"Exception in cleanup: {str(e)}")
             raise e
 
+
 def parseCmdLineArgs():
     parser = argparse.ArgumentParser(description="Subscriber Application")
-    
-    parser.add_argument("-n", "--name", default="sub",
-                        help="Name of the subscriber")
-    
-    parser.add_argument("-d", "--discovery", default="localhost:5555",
-                        help="Discovery service address")
-    
-    parser.add_argument("-T", "--num_topics", type=int, default=1,
-                        help="Number of topics to subscribe")
-    
-    parser.add_argument("-l", "--loglevel", type=int, default=logging.INFO,
-                        choices=[logging.DEBUG,logging.INFO,logging.WARNING,
-                                logging.ERROR,logging.CRITICAL],
-                        help="logging level, choices 10,20,30,40,50")
-    
+
+    parser.add_argument("-n", "--name", default="sub", help="Name of the subscriber")
+
+    parser.add_argument(
+        "-d", "--discovery", default="localhost:5555", help="Discovery service address"
+    )
+
+    parser.add_argument(
+        "-T", "--num_topics", type=int, default=1, help="Number of topics to subscribe"
+    )
+
+    parser.add_argument(
+        "-l",
+        "--loglevel",
+        type=int,
+        default=logging.INFO,
+        choices=[
+            logging.DEBUG,
+            logging.INFO,
+            logging.WARNING,
+            logging.ERROR,
+            logging.CRITICAL,
+        ],
+        help="logging level, choices 10,20,30,40,50",
+    )
+
     return parser.parse_args()
+
 
 ###################################
 #
@@ -242,13 +268,14 @@ def main():
     except KeyboardInterrupt:
         logger.info("Subscriber Application - Interrupted by user")
         try:
-            if 'sub_app' in locals():
+            if "sub_app" in locals():
                 sub_app.cleanup()
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")
     except Exception as e:
         logger.error(f"Exception in main: {str(e)}")
         return
+
 
 ###################################
 #
@@ -257,6 +284,8 @@ def main():
 ###################################
 if __name__ == "__main__":
     # Set underlying default logging capabilities
-    logging.basicConfig(level=logging.DEBUG,
-                       format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
     main()
