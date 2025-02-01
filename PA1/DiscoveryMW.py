@@ -78,7 +78,7 @@ class DiscoveryMW:
 
             # Receive the request (non-blocking mode for debugging)
             try:
-                request_bytes = self.rep.recv(flags=zmq.NOBLOCK)
+                request_bytes = self.rep.recv()
             except zmq.Again:
                 self.logger.warning(
                     "DiscoveryMW::handle_request - No message received (ZMQ Again)"
@@ -147,11 +147,12 @@ class DiscoveryMW:
             disc_resp.msg_type = discovery_pb2.TYPE_REGISTER
             disc_resp.register_resp.CopyFrom(register_resp)
 
-            # Serialize and send
+            # Serialize and send response back to Publisher
             buf2send = disc_resp.SerializeToString()
-            self.rep.send(buf2send)
+            self.rep.send(buf2send)  # ✅ Ensure this actually sends data
+
             self.logger.info(
-                "DiscoveryMW::send_register_response - Response sent successfully"
+                f"DiscoveryMW::send_register_response - Sent response: {disc_resp}"
             )
 
         except Exception as e:
