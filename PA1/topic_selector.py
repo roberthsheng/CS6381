@@ -55,7 +55,7 @@ class TopicSelector:
         random.seed(time.time())
         
         # First pick a topic group to ensure overlap
-        group = list(self.topic_groups.values())[hash(os.getpid()) % len(self.topic_groups)]
+        group = list(self.topic_groups.values())[1 % len(self.topic_groups)]
         
         # If we need more topics than the group provides, add some random ones
         result = group[:num_topics]

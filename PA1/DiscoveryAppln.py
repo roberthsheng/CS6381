@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import logging
+import configparser
 import argparse
 from enum import Enum
 from DiscoveryMW import DiscoveryMW
@@ -73,57 +74,159 @@ class DiscoveryAppln:
             self.logger.error(f"Exception in driver: {str(e)}")
             raise e
 
-    def handle_register(self, register_req):
-        try:
-            self.logger.info("DiscoveryAppln::handle_register")
+    # def handle_register(self, register_req):
+    #     try:
+    #         self.logger.info("DiscoveryAppln::handle_register")
             
-            # Get registrant info
-            info = register_req.info
-            role = register_req.role
-            topics = register_req.topiclist
+    #         # Get registrant info
+    #         info = register_req.info
+    #         role = register_req.role
+    #         topics = register_req.topiclist
             
-            if role == discovery_pb2.ROLE_PUBLISHER:
-                # Store publisher info
-                for topic in topics:
-                    if topic not in self.publishers:
-                        self.publishers[topic] = []
-                    # Check for duplicate registration
-                    if not any(p["id"] == info.id for p in self.publishers[topic]):
-                        self.publishers[topic].append({
-                            "id": info.id,
-                            "addr": info.addr,
-                            "port": info.port
-                        })
-                self.registered_publishers += 1
-                self.logger.info(f"Registered publisher {info.id} for topics {topics}")
+    #         if role == discovery_pb2.ROLE_PUBLISHER:
+    #             # Store publisher info
+    #             for topic in topics:
+    #                 if topic not in self.publishers:
+    #                     self.publishers[topic] = []
+    #                 # Check for duplicate registration
+    #                 if not any(p["id"] == info.id for p in self.publishers[topic]):
+    #                     self.publishers[topic].append({
+    #                         "id": info.id,
+    #                         "addr": info.addr,
+    #                         "port": info.port
+    #                     })
+    #             self.registered_publishers += 1
+    #             self.logger.info(f"Registered publisher {info.id} for topics {topics}")
                 
-            elif role == discovery_pb2.ROLE_SUBSCRIBER:
-                # Store subscriber info
-                for topic in topics:
-                    if topic not in self.subscribers:
-                        self.subscribers[topic] = []
-                    # Check for duplicate registration
-                    if not any(s["id"] == info.id for s in self.subscribers[topic]):
-                        self.subscribers[topic].append({
-                            "id": info.id
-                        })
-                self.registered_subscribers += 1
-                self.logger.info(f"Registered subscriber {info.id} for topics {topics}")
+    #         elif role == discovery_pb2.ROLE_SUBSCRIBER:
+    #             # Store subscriber info
+    #             for topic in topics:
+    #                 if topic not in self.subscribers:
+    #                     self.subscribers[topic] = []
+    #                 # Check for duplicate registration
+    #                 if not any(s["id"] == info.id for s in self.subscribers[topic]):
+    #                     self.subscribers[topic].append({
+    #                         "id": info.id
+    #                     })
+    #             self.registered_subscribers += 1
+    #             self.logger.info(f"Registered subscriber {info.id} for topics {topics}")
+
+    #         elif role == discovery_pb2.ROLE_BOTH:
+    #           # it's a broker
+    #             self.broker_info = {
+    #               "id": info.id,
+    #                "addr": info.addr,
+    #                "port": info.port
+    #             }
+    #             self.logger.info(f"Registered broker {info.id}") 
             
-            self.logger.info(f"Current registration status: {self.registered_publishers}/{self.expected_publishers} publishers, {self.registered_subscribers}/{self.expected_subscribers} subscribers")
+    #         self.logger.info(f"Current registration status: {self.registered_publishers}/{self.expected_publishers} publishers, {self.registered_subscribers}/{self.expected_subscribers} subscribers")
             
-            # Send success response
-            self.mw_obj.send_register_response(discovery_pb2.STATUS_SUCCESS)
+    #         # Send success response
+    #         self.mw_obj.send_register_response(discovery_pb2.STATUS_SUCCESS)
+            
+    #         return 0
+            
+    #     except Exception as e:
+    #         self.logger.error(f"Exception in handle_register: {str(e)}")
+    #         self.mw_obj.send_register_response(
+    #             discovery_pb2.STATUS_FAILURE,
+    #             str(e)
+    #         )
+    #         raise e
+
+    def handle_register(self, register_req):
+        self.logger.info("DiscoveryAppln::handle_register")
+        
+        # Get registrant info
+        info = register_req.info
+        role = register_req.role
+        topics = register_req.topiclist
+        
+        if role == discovery_pb2.ROLE_PUBLISHER:
+            # Store publisher info
+            for topic in topics:
+                if topic not in self.publishers:
+                    self.publishers[topic] = []
+                # Check for duplicate registration
+                if not any(p["id"] == info.id for p in self.publishers[topic]):
+                    self.publishers[topic].append({
+                        "id": info.id,
+                        "addr": info.addr,
+                        "port": info.port
+                    })
+            self.registered_publishers += 1
+            self.logger.info(f"Registered publisher {info.id} for topics {topics}")
+            
+        elif role == discovery_pb2.ROLE_SUBSCRIBER:
+            # Store subscriber info
+            for topic in topics:
+                if topic not in self.subscribers:
+                    self.subscribers[topic] = []
+                # Check for duplicate registration
+                if not any(s["id"] == info.id for s in self.subscribers[topic]):
+                    self.subscribers[topic].append({
+                        "id": info.id
+                    })
+            self.registered_subscribers += 1
+            self.logger.info(f"Registered subscriber {info.id} for topics {topics}")
+        elif role == discovery_pb2.ROLE_BOTH:
+            # it's a broker
+            self.broker_info = {
+                "id": info.id,
+                "addr": info.addr,
+                "port": info.port
+            }
+            self.logger.info(f"Registered broker {info.id}")
+
+        
+        self.logger.info(f"Current registration status: {self.registered_publishers}/{self.expected_publishers} publishers, {self.registered_subscribers}/{self.expected_subscribers} subscribers")
+        
+        # Send success response
+        self.mw_obj.send_register_response(discovery_pb2.STATUS_SUCCESS)
+        
+        return 0
+
+    def handle_lookup(self, lookup_req):
+            self.logger.info("DiscoveryAppln::handle_lookup")
+            self.lookup_count += 1
+            
+             # Read dissemination strategy from config
+            config = configparser.ConfigParser()
+            config.read("config.ini")
+            dissemination = config["Dissemination"]["Strategy"]
+
+            # Convert publisher info to RegistrantInfo objects
+            matching_publishers = []
+            if dissemination == "Direct":
+              for topic in lookup_req.topiclist:
+                if topic in self.publishers:
+                    for pub_info in self.publishers[topic]:
+                        reg_info = discovery_pb2.RegistrantInfo()
+                        reg_info.id = pub_info["id"]
+                        reg_info.addr = pub_info["addr"]
+                        reg_info.port = pub_info["port"]
+                        # Only add if not already in the list
+                        if not any(p.id == reg_info.id for p in matching_publishers):
+                            matching_publishers.append(reg_info)
+            elif dissemination == "ViaBroker":
+                 if hasattr(self, 'broker_info') and self.broker_info:
+                    reg_info = discovery_pb2.RegistrantInfo()
+                    reg_info.id = self.broker_info["id"]
+                    reg_info.addr = self.broker_info["addr"]
+                    reg_info.port = self.broker_info["port"]
+                    matching_publishers.append(reg_info)
+                    self.logger.debug ("Broker address found and sent")
+                 else:
+                   self.logger.warning ("Broker not registered, no lookup done")
+
+            
+            self.logger.info(f"Lookup request {self.lookup_count}: Found {len(matching_publishers)} unique publishers for topics {lookup_req.topiclist}")
+            
+            # Send response with the list of matching publishers
+            self.mw_obj.send_lookup_response(matching_publishers)
             
             return 0
-            
-        except Exception as e:
-            self.logger.error(f"Exception in handle_register: {str(e)}")
-            self.mw_obj.send_register_response(
-                discovery_pb2.STATUS_FAILURE,
-                str(e)
-            )
-            raise e
 
     def handle_isready(self, isready_req):
         try:
@@ -146,34 +249,34 @@ class DiscoveryAppln:
             self.logger.error(f"Exception in handle_isready: {str(e)}")
             raise e
 
-    def handle_lookup(self, lookup_req):
-        try:
-            self.logger.info("DiscoveryAppln::handle_lookup")
-            self.lookup_count += 1
+    # def handle_lookup(self, lookup_req):
+    #     try:
+    #         self.logger.info("DiscoveryAppln::handle_lookup")
+    #         self.lookup_count += 1
             
-            # Convert publisher info to RegistrantInfo objects
-            matching_publishers = []
-            for topic in lookup_req.topiclist:
-                if topic in self.publishers:
-                    for pub_info in self.publishers[topic]:
-                        reg_info = discovery_pb2.RegistrantInfo()
-                        reg_info.id = pub_info["id"]
-                        reg_info.addr = pub_info["addr"]
-                        reg_info.port = pub_info["port"]
-                        # Only add if not already in the list
-                        if not any(p.id == reg_info.id for p in matching_publishers):
-                            matching_publishers.append(reg_info)
+    #         # Convert publisher info to RegistrantInfo objects
+    #         matching_publishers = []
+    #         for topic in lookup_req.topiclist:
+    #             if topic in self.publishers:
+    #                 for pub_info in self.publishers[topic]:
+    #                     reg_info = discovery_pb2.RegistrantInfo()
+    #                     reg_info.id = pub_info["id"]
+    #                     reg_info.addr = pub_info["addr"]
+    #                     reg_info.port = pub_info["port"]
+    #                     # Only add if not already in the list
+    #                     if not any(p.id == reg_info.id for p in matching_publishers):
+    #                         matching_publishers.append(reg_info)
             
-            self.logger.info(f"Lookup request {self.lookup_count}: Found {len(matching_publishers)} unique publishers for topics {lookup_req.topiclist}")
+    #         self.logger.info(f"Lookup request {self.lookup_count}: Found {len(matching_publishers)} unique publishers for topics {lookup_req.topiclist}")
             
-            # Send response with the list of matching publishers
-            self.mw_obj.send_lookup_response(matching_publishers)
+    #         # Send response with the list of matching publishers
+    #         self.mw_obj.send_lookup_response(matching_publishers)
             
-            return 0
+    #         return 0
             
-        except Exception as e:
-            self.logger.error(f"Exception in handle_lookup: {str(e)}")
-            raise e
+    #     except Exception as e:
+    #         self.logger.error(f"Exception in handle_lookup: {str(e)}")
+    #         raise e
 
     def invoke_operation(self):
         """Handle any periodic operations - in Discovery's case, just return None"""

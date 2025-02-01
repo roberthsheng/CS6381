@@ -13,6 +13,7 @@ from enum import Enum
 from SubscriberMW import SubscriberMW
 from CS6381_MW import discovery_pb2
 from topic_selector import TopicSelector
+import pdb
 
 
 class SubscriberAppln:
@@ -31,7 +32,7 @@ class SubscriberAppln:
         self.mw_obj = None
         self.logger = logger
         self.lookup_attempts = 0
-        self.max_lookup_attempts = 3
+        self.max_lookup_attempts = 30
         self.received_publications = {}  # Track received publications per topic
 
     def configure(self, args):
