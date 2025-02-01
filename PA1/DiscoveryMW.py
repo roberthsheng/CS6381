@@ -149,12 +149,15 @@ class DiscoveryMW:
 
             # Serialize and send response back to Publisher
             buf2send = disc_resp.SerializeToString()
+            self.logger.debug(f"DiscoveryMW::send_register_response - Ready to send")
             self.rep.send(buf2send)  # ✅ Ensure this actually sends data
-
-            self.logger.info(
+            self.logger.debug(
                 f"DiscoveryMW::send_register_response - Sent response: {disc_resp}"
             )
 
+        except zmq.error.ZMQError as e:
+           self.logger.error(f"DiscoveryMW::send_register_response - ZMQ Exception: {str(e)}")
+           raise e # This will let the main application log the error as well
         except Exception as e:
             self.logger.error(
                 f"DiscoveryMW::send_register_response - Exception: {str(e)}"
