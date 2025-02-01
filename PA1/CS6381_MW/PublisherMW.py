@@ -163,14 +163,7 @@ class PublisherMW:
             pub_msg.timestamp = int(time.time() * 1000) # Time in milliseconds
 
             buf2send = pub_msg.SerializeToString()
-            self.pub.send(buf2send)
-            # # For now, simply format as "topic:data"
-            # # In future, use protobuf for more complex data
-            # send_str = f"{topic}:{data}"
-            # self.logger.debug(f"PublisherMW::disseminate - {send_str}")
-
-            # # Send as bytes with utf-8 encoding
-            # self.pub.send(bytes(send_str, "utf-8"))
+            self.pub.send_multipart([topic.encode('utf-8'), buf2send])
 
         except Exception as e:
             raise e

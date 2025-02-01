@@ -143,31 +143,13 @@ class SubscriberMW:
         except Exception as e:
             raise e
 
-    # def handle_publication(self):
-    #     try:
-    #         self.logger.info("SubscriberMW::handle_publication")
-
-    #         # Receive publication
-    #         data = self.sub.recv_string()
-
-    #         # Parse topic and value (assuming "topic:value" format)
-    #         topic, value = data.split(":", 1)
-
-    #         # Let application handle the data
-    #         timeout = self.upcall_obj.handle_publication(topic, value)
-
-    #         return timeout
-
-    #     except Exception as e:
-    #         raise e
-
 
     def handle_publication(self):
         try:
             self.logger.info("SubscriberMW::handle_publication")
 
             # Receive the serialized message
-            msg_bytes = self.sub.recv()
+            topic, msg_bytes = self.sub.recv_multipart()
 
             # Deserialize using protobuf
             pub_msg = topic_pb2.Publication()
