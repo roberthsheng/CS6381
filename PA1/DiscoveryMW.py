@@ -107,7 +107,7 @@ class DiscoveryMW:
                 timeout = self.upcall_obj.handle_register(disc_req.register_req)
 
                 # FIX: Send response back to publisher/subscriber
-                self.send_register_response(status=discovery_pb2.STATUS_SUCCESS)
+                # self.send_register_response(status=discovery_pb2.STATUS_SUCCESS)
 
             elif disc_req.msg_type == discovery_pb2.TYPE_ISREADY:
                 self.logger.info(
@@ -149,15 +149,12 @@ class DiscoveryMW:
 
             # Serialize and send response back to Publisher
             buf2send = disc_resp.SerializeToString()
-            self.logger.debug(f"DiscoveryMW::send_register_response - Ready to send")
             self.rep.send(buf2send)  # ✅ Ensure this actually sends data
-            self.logger.debug(
+
+            self.logger.info(
                 f"DiscoveryMW::send_register_response - Sent response: {disc_resp}"
             )
 
-        except zmq.error.ZMQError as e:
-           self.logger.error(f"DiscoveryMW::send_register_response - ZMQ Exception: {str(e)}")
-           raise e # This will let the main application log the error as well
         except Exception as e:
             self.logger.error(
                 f"DiscoveryMW::send_register_response - Exception: {str(e)}"
