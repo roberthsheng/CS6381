@@ -40,9 +40,12 @@ class DiscoveryMW:
             bind_string = f"tcp://*:{args.port}"
             self.rep.bind(bind_string)
 
-            self.logger.info("DiscoveryMW::configure completed")
+            self.logger.info(
+                f"DiscoveryMW::configure completed. Listening on {bind_string}"
+            )
 
         except Exception as e:
+            self.logger.error(f"DiscoveryMW::configure - Exception: {str(e)}")
             raise e
 
     def event_loop(self, timeout=None):
@@ -59,37 +62,74 @@ class DiscoveryMW:
                     timeout = self.handle_request()
 
                 else:
-                    raise Exception("Unknown event")
+                    self.logger.warning(
+                        "DiscoveryMW::event_loop - Unknown event encountered"
+                    )
 
             self.logger.info("DiscoveryMW::event_loop - done")
 
         except Exception as e:
+            self.logger.error(f"DiscoveryMW::event_loop - Exception: {str(e)}")
             raise e
 
     def handle_request(self):
         try:
-            self.logger.info("DiscoveryMW::handle_request")
+            self.logger.info("DiscoveryMW::handle_request - Waiting for request...")
 
-            # Receive the request
-            request_bytes = self.rep.recv()
+            # Receive the request (non-blocking mode for debugging)
+            try:
+                request_bytes = self.rep.recv(flags=zmq.NOBLOCK)
+            except zmq.Again:
+                self.logger.warning(
+                    "DiscoveryMW::handle_request - No message received (ZMQ Again)"
+                )
+                return None  # No message, return to event loop
+
+            # Log raw bytes received
+            self.logger.info(
+                f"DiscoveryMW::handle_request - Received raw bytes: {request_bytes}"
+            )
 
             # Deserialize using protobuf
             disc_req = discovery_pb2.DiscoveryReq()
             disc_req.ParseFromString(request_bytes)
 
+            # Log parsed request type
+            self.logger.info(
+                f"DiscoveryMW::handle_request - Parsed request type: {disc_req.msg_type}"
+            )
+
             # Handle different message types
             if disc_req.msg_type == discovery_pb2.TYPE_REGISTER:
+                self.logger.info(
+                    "DiscoveryMW::handle_request - Handling TYPE_REGISTER request"
+                )
                 timeout = self.upcall_obj.handle_register(disc_req.register_req)
+
+                # FIX: Send response back to publisher/subscriber
+                self.send_register_response(status=discovery_pb2.STATUS_SUCCESS)
+
             elif disc_req.msg_type == discovery_pb2.TYPE_ISREADY:
+                self.logger.info(
+                    "DiscoveryMW::handle_request - Handling TYPE_ISREADY request"
+                )
                 timeout = self.upcall_obj.handle_isready(disc_req.isready_req)
+
             elif disc_req.msg_type == discovery_pb2.TYPE_LOOKUP_PUB_BY_TOPIC:
+                self.logger.info(
+                    "DiscoveryMW::handle_request - Handling TYPE_LOOKUP_PUB_BY_TOPIC request"
+                )
                 timeout = self.upcall_obj.handle_lookup(disc_req.lookup_req)
+
             else:
-                raise ValueError("Unhandled message type")
+                self.logger.warning(
+                    f"DiscoveryMW::handle_request - Unknown request type: {disc_req.msg_type}"
+                )
 
             return timeout
 
         except Exception as e:
+            self.logger.error(f"DiscoveryMW::handle_request - Exception: {str(e)}")
             raise e
 
     def send_register_response(self, status, reason=None):
@@ -110,9 +150,14 @@ class DiscoveryMW:
             # Serialize and send
             buf2send = disc_resp.SerializeToString()
             self.rep.send(buf2send)
+            self.logger.info(
+                "DiscoveryMW::send_register_response - Response sent successfully"
+            )
 
         except Exception as e:
-            self.logger.error(f"Error in send_register_response: {str(e)}")
+            self.logger.error(
+                f"DiscoveryMW::send_register_response - Exception: {str(e)}"
+            )
             raise e
 
     def send_isready_response(self, status):
@@ -131,9 +176,14 @@ class DiscoveryMW:
             # Serialize and send
             buf2send = disc_resp.SerializeToString()
             self.rep.send(buf2send)
+            self.logger.info(
+                "DiscoveryMW::send_isready_response - Response sent successfully"
+            )
 
         except Exception as e:
-            self.logger.error(f"Error in send_isready_response: {str(e)}")
+            self.logger.error(
+                f"DiscoveryMW::send_isready_response - Exception: {str(e)}"
+            )
             raise e
 
     def send_lookup_response(self, publisher_list):
@@ -155,9 +205,14 @@ class DiscoveryMW:
             # Serialize and send
             buf2send = disc_resp.SerializeToString()
             self.rep.send(buf2send)
+            self.logger.info(
+                "DiscoveryMW::send_lookup_response - Response sent successfully"
+            )
 
         except Exception as e:
-            self.logger.error(f"Error in send_lookup_response: {str(e)}")
+            self.logger.error(
+                f"DiscoveryMW::send_lookup_response - Exception: {str(e)}"
+            )
             raise e
 
     def set_upcall_handle(self, upcall_obj):
