@@ -72,9 +72,30 @@ class TestHarness:
         self.processes[f"sub_{name}"] = proc
         time.sleep(1)  # Give subscriber time to start
 
+    def start_broker(self):
+        """Start the broker"""
+        cmd = [
+            "python3",
+            "BrokerAppln.py",
+            "-n", "broker",
+            "-d", "localhost:5555",  # Discovery service address
+            "-c", "config.ini",      # Config file (which should have dissemination strategy, etc.)
+            "-l", str(logging.DEBUG)
+        ]
+        self.logger.info(f"Starting Broker: {' '.join(cmd)}")
+        proc = subprocess.Popen(cmd)
+        self.processes["broker"] = proc
+        time.sleep(2)  # Give broker time to start
+
 def test_direct_dissemination(logger):
     """Test the direct dissemination strategy"""
     try:
+        # Update config to use direct
+        with open("config.ini", "w") as f:
+            f.write("[Discovery]\n")
+            f.write("Strategy=Centralized\n\n")
+            f.write("[Dissemination]\n")
+            f.write("Strategy=Direct\n")
         # Create test harness
         harness = TestHarness(logger)
 
@@ -115,7 +136,7 @@ def test_broker_dissemination(logger):
         harness.start_discovery(5555, 2, 2)  # 2 pubs, 2 subs
 
         # Start broker (when implemented)
-        # harness.start_broker()
+        harness.start_broker()
 
         # Start publishers
         harness.start_publisher("pub1", 5556, topics=2)
