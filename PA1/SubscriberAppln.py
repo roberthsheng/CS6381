@@ -21,9 +21,10 @@ class SubscriberAppln:
         INITIALIZE = 0
         CONFIGURE = 1
         REGISTER = 2
-        LOOKUP = 3
-        LISTENING = 4
-        COMPLETED = 5
+        ISREADY = 3
+        LOOKUP = 4
+        LISTENING = 5
+        COMPLETED = 6
 
     def __init__(self, logger):
         self.state = self.State.INITIALIZE
@@ -83,6 +84,21 @@ class SubscriberAppln:
             self.logger.error(f"Exception in driver: {str(e)}")
             raise e
 
+    def isready_response(self, isready_resp):
+        try:
+            self.logger.info("SubscriberAppln::isready_response")
+            if isready_resp.status:  # Assuming status is a boolean or equivalent (True means ready)
+                self.logger.info("System is ready; moving to lookup state.")
+                self.state = self.State.LOOKUP
+            else:
+                self.logger.info("System not ready yet; will retry isready query.")
+                time.sleep(1)  # Wait a bit before retrying
+            return 0
+        except Exception as e:
+            self.logger.error(f"Exception in isready_response: {str(e)}")
+            raise e
+ 
+
     def invoke_operation(self):
         try:
             self.logger.info("SubscriberAppln::invoke_operation")
@@ -91,6 +107,11 @@ class SubscriberAppln:
                 # Register with discovery service
                 self.logger.debug("SubscriberAppln::invoke_operation - Registering")
                 self.mw_obj.register(self.name, self.topiclist)
+                return None
+
+            elif self.state == self.State.ISREADY:
+                self.logger.debug("SubscriberAppln::invoke_operation - Querying isready")
+                self.mw_obj.is_ready()
                 return None
 
             elif self.state == self.State.LOOKUP:
@@ -122,7 +143,7 @@ class SubscriberAppln:
                 self.logger.debug(
                     "SubscriberAppln::register_response - Registration successful"
                 )
-                self.state = self.State.LOOKUP
+                self.state = self.State.ISREADY
                 return 0
             else:
                 raise Exception(f"Registration failed: {register_resp.reason}")

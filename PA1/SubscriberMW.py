@@ -135,6 +135,8 @@ class SubscriberMW:
                 timeout = self.upcall_obj.register_response(disc_resp.register_resp)
             elif disc_resp.msg_type == discovery_pb2.TYPE_LOOKUP_PUB_BY_TOPIC:
                 timeout = self.upcall_obj.lookup_response(disc_resp.lookup_resp)
+            elif disc_resp.msg_type == discovery_pb2.TYPE_ISREADY:
+                timeout = self.upcall_obj.isready_response(disc_resp.isready_resp)
             else:
                 raise ValueError("Unknown response type")
 
@@ -168,6 +170,25 @@ class SubscriberMW:
 
         except Exception as e:
             raise e
+
+    def is_ready(self):
+        try:
+            self.logger.info("SubscriberMW::is_ready")
+            # Create isready request
+            isready_req = discovery_pb2.IsReadyReq()
+
+            # Create discovery request
+            disc_req = discovery_pb2.DiscoveryReq()
+            disc_req.msg_type = discovery_pb2.TYPE_ISREADY
+            disc_req.isready_req.CopyFrom(isready_req)
+
+            # Serialize and send the request
+            buf2send = disc_req.SerializeToString()
+            self.req.send(buf2send)
+        except Exception as e:
+            self.logger.error(f"SubscriberMW::is_ready - Exception: {str(e)}")
+            raise e
+
 
     def connect_to_publishers(self, publishers, topics):
         try:
