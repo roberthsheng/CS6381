@@ -24,6 +24,8 @@ class BrokerAppln:
         self.name = None
         self.mw_obj = None
         self.logger = logger
+        self.max_lookup_attempts = 10
+        self.lookup_attempts = 0
         self.subscribers = {}  # {topic: [subscriber_info]}
 
     def configure(self, args):
@@ -83,6 +85,17 @@ class BrokerAppln:
                 self.logger.debug("BrokerAppln::invoke_operation - Registering")
                 self.mw_obj.register(self.name)
                 return None
+            elif self.state == self.State.ISREADY:
+                self.logger.debug("BrokerAppln::invoke_operation - Querying isready")
+                self.mw_obj.is_ready()
+                return None
+            elif self.state == self.State.LOOKUP:
+                self.logger.debug(
+                    "BrokerAppln::invoke_operation - Looking up publishers"
+                )
+                self.lookup_attempts += 1
+                self.mw_obj.lookup_all_publishers()
+                return None
             elif self.state == self.State.RUNNING:
                 # The broker should continue running and routing data.
                 return None
@@ -97,10 +110,8 @@ class BrokerAppln:
             self.logger.info("BrokerAppln::register_response")
             if register_resp.status == discovery_pb2.STATUS_SUCCESS:
                 self.logger.info("BrokerAppln::register_response - Registration successful")
-                self.state = self.State.RUNNING
-                # Here we don't call lookup. The broker doesn't need any publisher info,
-                # and we rely on the subscribers to connect to this broker
-                # Therefore, after registration, we can immediately proceed to routing data.
+                self.state = self.State.ISREADY
+                # now begin waiting until all parties are ready
                 return 0
             else:
                 raise Exception(f"Registration failed: {register_resp.reason}")

@@ -1,5 +1,6 @@
 import time
 import zmq
+import configparser
 from CS6381_MW import discovery_pb2, topic_pb2
 
 
@@ -134,6 +135,7 @@ class BrokerMW:
                     f"Connected to publisher {pub.id} at {connect_str}"
                 )
 
+            self.sub.setsockopt_string(zmq.SUBSCRIBE, "")
         except Exception as e:
             self.logger.error(f"Error in connect_to_publishers: {str(e)}")
             raise e
@@ -215,7 +217,7 @@ class BrokerMW:
             self.logger.debug("BrokerMW::disseminate")
 
             pub_msg = topic_pb2.Publication()
-            pub_msg.publisher_id = 0
+            pub_msg.publisher_id = "broker"
             pub_msg.topic = topic
             pub_msg.data = data
             pub_msg.timestamp = int(time.time() * 1000)  # Time in milliseconds

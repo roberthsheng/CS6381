@@ -207,14 +207,15 @@ class DiscoveryAppln:
                             matching_publishers.append(reg_info)
         elif dissemination == "ViaBroker":
             if len(lookup_req.topiclist) == 0: # broker looking up publishers
-                for pub_info in pubs:
-                    reg_info = discovery_pb2.RegistrantInfo()
-                    reg_info.id = pub_info["id"]
-                    reg_info.addr = pub_info["addr"]
-                    reg_info.port = pub_info["port"]
-                    # Avoid duplicates if the same publisher is registered under multiple topics.
-                    if not any(p.id == reg_info.id for p in matching_publishers):
-                        matching_publishers.append(reg_info)
+                for _, publishers in self.publishers.items():
+                    for pub_info in publishers:
+                        reg_info = discovery_pb2.RegistrantInfo()
+                        reg_info.id = pub_info["id"]
+                        reg_info.addr = pub_info["addr"]
+                        reg_info.port = pub_info["port"]
+                        # Avoid duplicates if the same publisher is registered under multiple topics.
+                        if not any(p.id == reg_info.id for p in matching_publishers):
+                            matching_publishers.append(reg_info)
             else: # subscribers looking up broker
                 if hasattr(self, "broker_info") and self.broker_info:
                     reg_info = discovery_pb2.RegistrantInfo()
