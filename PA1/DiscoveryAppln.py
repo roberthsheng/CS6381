@@ -202,35 +202,6 @@ class DiscoveryAppln:
             self.logger.error(f"Exception in handle_isready: {str(e)}")
             raise e
 
-    # def handle_lookup(self, lookup_req):
-    #     try:
-    #         self.logger.info("DiscoveryAppln::handle_lookup")
-    #         self.lookup_count += 1
-
-    #         # Convert publisher info to RegistrantInfo objects
-    #         matching_publishers = []
-    #         for topic in lookup_req.topiclist:
-    #             if topic in self.publishers:
-    #                 for pub_info in self.publishers[topic]:
-    #                     reg_info = discovery_pb2.RegistrantInfo()
-    #                     reg_info.id = pub_info["id"]
-    #                     reg_info.addr = pub_info["addr"]
-    #                     reg_info.port = pub_info["port"]
-    #                     # Only add if not already in the list
-    #                     if not any(p.id == reg_info.id for p in matching_publishers):
-    #                         matching_publishers.append(reg_info)
-
-    #         self.logger.info(f"Lookup request {self.lookup_count}: Found {len(matching_publishers)} unique publishers for topics {lookup_req.topiclist}")
-
-    #         # Send response with the list of matching publishers
-    #         self.mw_obj.send_lookup_response(matching_publishers)
-
-    #         return 0
-
-    #     except Exception as e:
-    #         self.logger.error(f"Exception in handle_lookup: {str(e)}")
-    #         raise e
-
     def invoke_operation(self):
         """Handle any periodic operations - in Discovery's case, just return None"""
         try:
@@ -269,6 +240,8 @@ def parseCmdLineArgs():
     parser.add_argument(
         "-P", "--publishers", type=int, default=1, help="Expected number of publishers"
     )
+
+    parser.add_argument ("-a", "--addr", default="localhost", help="IP addr of this service to advertise (default: localhost)")
 
     parser.add_argument(
         "-S",

@@ -37,7 +37,7 @@ class DiscoveryMW:
             self.poller.register(self.rep, zmq.POLLIN)
 
             # Decide the binding string for the REP socket
-            bind_string = f"tcp://*:{args.port}"
+            bind_string = f"tcp://{args.addr}:{args.port}"
             self.rep.bind(bind_string)
 
             self.logger.info(
