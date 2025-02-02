@@ -80,6 +80,8 @@ class TestHarness:
             "-n", "broker",
             "-d", "localhost:5555",  # Discovery service address
             "-c", "config.ini",      # Config file (which should have dissemination strategy, etc.)
+            "-a", "0.0.0.0",         # Broker's bind address
+            "-p", "5560",            # Broker's publish port 
             "-l", str(logging.DEBUG)
         ]
         self.logger.info(f"Starting Broker: {' '.join(cmd)}")

@@ -19,6 +19,9 @@ class BrokerMW:
         try:
             self.logger.info("BrokerMW::configure")
 
+            self.port = args.port
+            self.addr = args.addr
+
             # Get ZMQ context
             context = zmq.Context()
 
@@ -32,7 +35,7 @@ class BrokerMW:
 
             # Create PUB socket for sending to subscribers
             self.pub = context.socket(zmq.PUB)
-            bind_str = "tcp://*:5560"  # you will need to read this from config.ini
+            bind_str = f"tcp://{args.addr}:{args.port}"  # you will need to read this from config.ini
             self.pub.bind(bind_str)
 
             # Create poller
@@ -113,6 +116,28 @@ class BrokerMW:
         except Exception as e:
             raise e
 
+    def connect_to_publishers(self, publishers):
+        try:
+            self.logger.info("BrokerMW::connect_to_publishers")
+
+            # Read dissemination strategy from config
+            config = configparser.ConfigParser()
+            config.read("config.ini")
+            dissemination = config["Dissemination"]["Strategy"]
+
+            # Connect to each publisher
+            for pub in publishers:
+                # Access fields through protobuf getters
+                connect_str = f"tcp://{pub.addr}:{pub.port}"
+                self.sub.connect(connect_str)
+                self.logger.debug(
+                    f"Connected to publisher {pub.id} at {connect_str}"
+                )
+
+        except Exception as e:
+            self.logger.error(f"Error in connect_to_publishers: {str(e)}")
+            raise e
+
     def is_ready(self):
         try:
             self.logger.info("BrokerMW::is_ready")
@@ -158,7 +183,7 @@ class BrokerMW:
         except Exception as e:
             raise e
 
-    def register(self, name, topiclist):
+    def register(self, name):
         try:
             self.logger.info("BrokerMW::register")
             # Create register request
@@ -170,8 +195,9 @@ class BrokerMW:
             # Add registrant info
             reg_info = discovery_pb2.RegistrantInfo()
             reg_info.id = name
+            reg_info.addr = self.addr
+            reg_info.port = self.port
             register_req.info.CopyFrom(reg_info)
-            register_req.topiclist.extend(topiclist)
 
             # Create discovery request
             disc_req = discovery_pb2.DiscoveryReq()
@@ -184,12 +210,12 @@ class BrokerMW:
         except Exception as e:
             raise e
 
-    def disseminate(self, id, topic, data):
+    def disseminate(self, topic, data):
         try:
             self.logger.debug("BrokerMW::disseminate")
 
             pub_msg = topic_pb2.Publication()
-            pub_msg.publisher_id = id
+            pub_msg.publisher_id = 0
             pub_msg.topic = topic
             pub_msg.data = data
             pub_msg.timestamp = int(time.time() * 1000)  # Time in milliseconds

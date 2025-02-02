@@ -7,21 +7,21 @@ import configparser
 from enum import Enum
 from CS6381_MW.BrokerMW import BrokerMW
 from CS6381_MW import discovery_pb2
-from topic_selector import TopicSelector
+
 
 class BrokerAppln:
     class State(Enum):
         INITIALIZE = 0
         CONFIGURE = 1
         REGISTER = 2
-        LOOKUP = 3
-        RUNNING = 4
-        COMPLETED = 5
+        ISREADY = 3
+        LOOKUP = 4
+        RUNNING = 5
+        COMPLETED = 6
 
     def __init__(self, logger):
         self.state = self.State.INITIALIZE
         self.name = None
-        self.topiclist = None
         self.mw_obj = None
         self.logger = logger
         self.subscribers = {}  # {topic: [subscriber_info]}
@@ -38,10 +38,6 @@ class BrokerAppln:
             config.read (args.config)
             self.dissemination = config["Dissemination"]["Strategy"]
 
-            # Get topics of interest
-            ts = TopicSelector()
-            self.topiclist = ts.interest()
-            self.logger.info(f"BrokerAppln::configure - Topics {self.topiclist}")
 
             # Initialize the middleware
             self.mw_obj = BrokerMW(self.logger)
@@ -51,6 +47,20 @@ class BrokerAppln:
         
         except Exception as e:
             self.logger.error(f"Exception in configure: {str(e)}")
+            raise e
+            
+    def isready_response(self, isready_resp):
+        try:
+            self.logger.info("BrokerAppln::isready_response")
+            if isready_resp.status:  # Assuming status is a boolean or equivalent (True means ready)
+                self.logger.info("System is ready; moving to lookup state.")
+                self.state = self.State.LOOKUP
+            else:
+                self.logger.info("System not ready yet; will retry isready query.")
+                time.sleep(1)  # Wait a bit before retrying
+            return 0
+        except Exception as e:
+            self.logger.error(f"Exception in isready_response: {str(e)}")
             raise e
 
     def driver(self):
@@ -71,7 +81,7 @@ class BrokerAppln:
             if self.state == self.State.REGISTER:
                 # Register with discovery service
                 self.logger.debug("BrokerAppln::invoke_operation - Registering")
-                self.mw_obj.register(self.name, self.topiclist)
+                self.mw_obj.register(self.name)
                 return None
             elif self.state == self.State.RUNNING:
                 # The broker should continue running and routing data.
@@ -98,11 +108,43 @@ class BrokerAppln:
             self.logger.error(f"Exception in register_response: {str(e)}")
             raise e
 
+    def lookup_response(self, lookup_resp):
+        try:
+            self.logger.info("BrokerAppln::lookup_response")
+
+            # Check if we received any publishers
+            if not hasattr(lookup_resp, "publishers") or not lookup_resp.publishers:
+                self.logger.debug("No publishers found in response")
+
+                # Check if we should retry
+                if self.lookup_attempts < self.max_lookup_attempts:
+                    self.logger.info(
+                        f"Retry {self.lookup_attempts}/{self.max_lookup_attempts}"
+                    )
+                    time.sleep(1)  # Wait before retry
+                    return 0  # Will trigger another lookup
+                else:
+                    self.logger.warning(
+                        "Max lookup attempts reached - continuing without publishers"
+                    )
+
+            # Connect to the publishers we received
+            self.mw_obj.connect_to_publishers(
+                list(lookup_resp.publishers) 
+            )
+
+            # Move to listening state
+            self.state = self.State.RUNNING
+            return 0
+
+        except Exception as e:
+            self.logger.error(f"Exception in lookup_response: {str(e)}")
+            raise e
+
 
     def handle_publication(self, topic, value):
         try:
            self.logger.debug(f"BrokerAppln::handle_publication: Topic: {topic}, Value: {value}")
-           # Since we are not doing protobof, simply forward the message.
            self.mw_obj.disseminate(topic, value)
            return 0 # Continue listening
 
@@ -135,7 +177,11 @@ def parseCmdLineArgs():
                         choices=[logging.DEBUG,logging.INFO,logging.WARNING,
                                 logging.ERROR,logging.CRITICAL],
                         help="logging level, choices 10,20,30,40,50")
-    
+
+    parser.add_argument("-a", "--addr", default="0.0.0.0",
+                        help="Broker's bind address (default: 0.0.0.0)")
+    parser.add_argument("-p", "--port", type=int, default=5560,
+                        help="Broker's publish port (default: 5560)") 
     return parser.parse_args()
 
 ###################################

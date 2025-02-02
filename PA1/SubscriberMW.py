@@ -199,37 +199,21 @@ class SubscriberMW:
             config.read("config.ini")
             dissemination = config["Dissemination"]["Strategy"]
 
-            if dissemination == "Direct":
-                # Connect to each publisher
-                for pub in publishers:
-                    # Access fields through protobuf getters
-                    connect_str = f"tcp://{pub.addr}:{pub.port}"
-                    self.sub.connect(connect_str)
-                    self.logger.debug(
-                        f"Connected to publisher {pub.id} at {connect_str}"
-                    )
+            # Connect to each publisher
+            for pub in publishers:
+                # Access fields through protobuf getters
+                connect_str = f"tcp://{pub.addr}:{pub.port}"
+                self.sub.connect(connect_str)
+                self.logger.debug(
+                    f"Connected to publisher {pub.id} at {connect_str}"
+                )
 
-                # Subscribe to all topics
-                for topic in topics:
-                    self.logger.debug(f"Subscribing to topic: {topic}")
-                    self.sub.setsockopt_string(zmq.SUBSCRIBE, topic)
+            # Subscribe to all topics
+            for topic in topics:
+                self.logger.debug(f"Subscribing to topic: {topic}")
+                self.sub.setsockopt_string(zmq.SUBSCRIBE, topic)
 
-            elif dissemination == "ViaBroker":
-                # Connect to broker
-                if not self.broker_binding:
-                    raise Exception("Broker binding not set")
-                self.sub.connect(self.broker_binding)
 
-                # Subscribe to topics
-                for topic in topics:
-                    self.sub.setsockopt_string(zmq.SUBSCRIBE, topic)
-
-            else:
-                raise ValueError(f"Unknown dissemination strategy: {dissemination}")
-
-            self.logger.info(
-                "Successfully connected to publishers and subscribed to topics"
-            )
 
         except Exception as e:
             self.logger.error(f"Error in connect_to_publishers: {str(e)}")
