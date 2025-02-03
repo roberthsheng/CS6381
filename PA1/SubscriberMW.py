@@ -8,10 +8,20 @@ import os
 import sys
 import time
 import logging
+import csv
 import zmq
 import configparser
+from dataclasses import dataclass
 from CS6381_MW import discovery_pb2, topic_pb2
 
+@dataclass
+class Record:
+    publisher_id: str
+    subscriber_id: str
+    topic: str
+    send_time: int
+    recv_time: int
+    dissemination: str 
 
 class SubscriberMW:
     def __init__(self, logger):
@@ -22,10 +32,28 @@ class SubscriberMW:
         self.upcall_obj = None
         self.handle_events = True
         self.broker_binding = None  # Used in broker-based dissemination
+        self.name = None
+        self.records = []
+        self.csv_file = None
+        self.csv_writer = None
+        self.dissemination = None
 
     def configure(self, args):
         try:
             self.logger.info("SubscriberMW::configure")
+            self.name = args.name
+
+            # Read dissemination strategy from config
+            config = configparser.ConfigParser()
+            config.read("config.ini")
+            dissemination = config["Dissemination"]["Strategy"] 
+            self.dissemination = dissemination
+
+            # Setup the CSV file for data logging
+            filename = f"{args.name}_data.csv"
+            self.csv_file = open(filename, 'w', newline='')
+            self.csv_writer = csv.writer(self.csv_file)
+            self.csv_writer.writerow(["publisher_id", "subscriber_id", "topic", "send_time", "recv_time", "broker_recv_time", "broker_send_time", "dissemination"])
 
             # Get ZMQ context
             context = zmq.Context()
@@ -161,6 +189,15 @@ class SubscriberMW:
             send_time = pub_msg.timestamp
             recv_time = int(time.time() * 1000)
             latency = recv_time - send_time
+            record = Record(
+                    publisher_id = pub_msg.publisher_id,
+                    subscriber_id = self.name,
+                    topic = topic,
+                    send_time = send_time,
+                    recv_time = recv_time,
+                    dissemination = self.dissemination
+            )
+            self.records.append(record)
             self.logger.debug(f"Received publication on topic {pub_msg.topic}, latency: {latency} ms")
 
             # Pass topic and data to the upcall
@@ -193,12 +230,6 @@ class SubscriberMW:
     def connect_to_publishers(self, publishers, topics):
         try:
             self.logger.info("SubscriberMW::connect_to_publishers")
-
-            # Read dissemination strategy from config
-            config = configparser.ConfigParser()
-            config.read("config.ini")
-            dissemination = config["Dissemination"]["Strategy"]
-
             # Connect to each publisher
             for pub in publishers:
                 # Access fields through protobuf getters
@@ -227,3 +258,36 @@ class SubscriberMW:
 
     def disable_event_loop(self):
         self.handle_events = False
+
+    def cleanup(self):
+        try:
+            self.logger.info("SubscriberMW::cleanup")
+            
+            # Write the data log to a csv file.
+            if self.records:
+                # Convert Record objects to list for CSV writing
+                rows = [
+                   [
+                    rec.publisher_id,
+                    rec.subscriber_id,
+                    rec.topic,
+                    rec.send_time,
+                    rec.recv_time,
+                    rec.dissemination
+                ] for rec in self.records]
+                self.csv_writer.writerows(rows)
+
+                self.logger.info(f"Wrote collected data to {self.csv_file.name}")
+
+            if self.sub:
+                self.sub.close()
+            if self.req:
+                self.req.close()
+            if self.poller:
+                self.poller.unregister(self.sub)
+                self.poller.unregister(self.req)
+            if self.csv_file:
+                self.csv_file.close()
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {str(e)}")
+            raise e
