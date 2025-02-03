@@ -95,7 +95,7 @@ class DiscoveryAppln:
                     self.publishers[topic].append(
                         {"id": info.id, "addr": info.addr, "port": info.port}
                     )
-            self.registered_publishers += 1
+            self.registered_publishers += 1 # race condition possible
             self.logger.info(f"Registered publisher {info.id} for topics {topics}")
 
         elif role == discovery_pb2.ROLE_SUBSCRIBER:
@@ -106,7 +106,7 @@ class DiscoveryAppln:
                 # Check for duplicate registration
                 if not any(s["id"] == info.id for s in self.subscribers[topic]):
                     self.subscribers[topic].append({"id": info.id})
-            self.registered_subscribers += 1
+            self.registered_subscribers += 1 # this can lead to race conditions lol
             self.logger.info(f"Registered subscriber {info.id} for topics {topics}")
         elif role == discovery_pb2.ROLE_BOTH:
             # it's a broker
@@ -183,6 +183,7 @@ class DiscoveryAppln:
             is_ready = (
                 self.registered_publishers == self.expected_publishers
                 and self.registered_subscribers == self.expected_subscribers
+                # TODO: add a branch for broker
             )
 
             if is_ready:

@@ -1,0 +1,4 @@
+pyzmq
+netifaces
+requests
+protobuf

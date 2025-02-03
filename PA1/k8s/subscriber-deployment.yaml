@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subscriber
+  namespace: pubsub-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: subscriber
+  template:
+    metadata:
+      labels:
+        app: subscriber
+    spec:
+      containers:
+        - name: subscriber
+          image: ghcr.io/d-zg/pubsub:latest
+          env:
+            - name: DISCOVERY_ADDRESS
+              value: "discovery-svc:5555"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command: ["python3", "SubscriberAppln.py"]
+          args:
+            - "-d"
+            - "discovery-svc:5555"
+            - "-n"
+            - "sub$(POD_NAME)"
+            - "-T"
+            - "2"
+            - "-l"
+            - "10"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /config
+      volumes:
+        - name: config-volume
+          configMap:
+            name: pubsub-config
