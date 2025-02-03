@@ -1,6 +1,7 @@
 import time
 import zmq
 import configparser
+import socket
 from CS6381_MW import discovery_pb2, topic_pb2
 
 
@@ -21,7 +22,7 @@ class BrokerMW:
             self.logger.info("BrokerMW::configure")
 
             self.port = args.port
-            self.addr = args.addr
+            self.addr = socket.gethostbyname(socket.gethostname())
 
             # Get ZMQ context
             context = zmq.Context()
