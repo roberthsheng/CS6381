@@ -50,7 +50,7 @@ class SubscriberMW:
             self.dissemination = dissemination
 
             # Setup the CSV file for data logging
-            filename = f"{args.name}_data.csv"
+            filename = f"/data/{args.name}_data.csv"
             self.csv_file = open(filename, 'w', newline='')
             self.csv_writer = csv.writer(self.csv_file)
             self.csv_writer.writerow(["publisher_id", "subscriber_id", "topic", "send_time", "recv_time", "broker_recv_time", "broker_send_time", "dissemination"])
