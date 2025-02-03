@@ -39,6 +39,9 @@ class BrokerAppln:
             config = configparser.ConfigParser ()
             config.read (args.config)
             self.dissemination = config["Dissemination"]["Strategy"]
+            if self.dissemination == "Direct":
+                self.logger.info("BrokerAppln::configure - Dissemination strategy set to Direct. Broker not required. Exiting.")
+                sys.exit(0)  # Exit gracefully if broker is not needed.                
 
 
             # Initialize the middleware
