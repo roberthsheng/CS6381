@@ -49,6 +49,8 @@ class SubscriberMW:
             dissemination = config["Dissemination"]["Strategy"] 
             self.dissemination = dissemination
 
+            self.write_interval = args.time
+
             # Setup the CSV file for data logging
             filename = f"/data/{args.name}_data.csv"
             self.csv_file = open(filename, 'w', newline='')
@@ -78,6 +80,7 @@ class SubscriberMW:
 
     def event_loop(self, timeout=None):
         try:
+            last_write_time = time.time()
             self.logger.info("SubscriberMW::event_loop - start")
 
             while self.handle_events:
@@ -97,6 +100,10 @@ class SubscriberMW:
 
                 else:
                     raise Exception("Unknown event")
+
+                if time.time() - last_write_time >= self.write_interval:
+                    self.write_records()
+                    last_write_time = time.time()
 
             self.logger.info("SubscriberMW::event_loop - done")
 
@@ -258,6 +265,27 @@ class SubscriberMW:
 
     def disable_event_loop(self):
         self.handle_events = False
+
+    def write_records(self):
+        self.logger.info("SubscriberMW::cleanup")
+        
+        # Write the data log to a csv file.
+        if self.records:
+            # Convert Record objects to list for CSV writing
+            rows = [
+                [
+                rec.publisher_id,
+                rec.subscriber_id,
+                rec.topic,
+                rec.send_time,
+                rec.recv_time,
+                rec.dissemination
+            ] for rec in self.records]
+            self.csv_writer.writerows(rows)
+
+            self.logger.info(f"Wrote collected data to {self.csv_file.name}")
+    
+
 
     def cleanup(self):
         try:

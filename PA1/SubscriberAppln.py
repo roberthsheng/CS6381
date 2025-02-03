@@ -239,7 +239,7 @@ def parseCmdLineArgs():
     )
 
     parser.add_argument(
-        "-t", "--time", type=int, default=60, help="Amount of time to run for"
+        "-t", "--time", type=int, default=15, help="Amount of time to run for"
     )
 
     parser.add_argument(
@@ -289,21 +289,7 @@ def main():
 
         # Now invoke the driver program
         logger.debug("Main: invoke the subscriber appln driver")
-        # run driver in a separate thread
-        from threading import Thread 
-        driver_thread = Thread(target=sub_app.driver)
-        driver_thread.start()
-
-        # Let the system run for a predetermined time (e.g., 30 seconds)
-        run_duration = args.time  # seconds; adjust as needed
-        logger.info(f"System will run for {run_duration} seconds before auto-cleanup.")
-        time.sleep(run_duration)
-
-        # Initiate cleanup
-        logger.info("Time limit reached. Initiating auto-cleanup...")
-        sub_app.cleanup()
-        driver_thread.join()
-        logger.info("Subscriber Application - Completed auto-cleanup.")
+        sub_app.driver() 
 
     except KeyboardInterrupt:
         logger.info("Subscriber Application - Interrupted by user")
