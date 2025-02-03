@@ -39,6 +39,11 @@ class DiscoveryAppln:
             self.logger.info("DiscoveryAppln::configure")
 
             self.state = self.State.CONFIGURE
+            # Read dissemination strategy from config
+            config = configparser.ConfigParser()
+            config.read("config.ini")
+            self.dissemination = config["Dissemination"]["Strategy"]
+            self.broker = False # no broker yet 
 
             # Initialize discovery middleware
             self.mw_obj = DiscoveryMW(self.logger)
@@ -110,6 +115,7 @@ class DiscoveryAppln:
             self.logger.info(f"Registered subscriber {info.id} for topics {topics}")
         elif role == discovery_pb2.ROLE_BOTH:
             # it's a broker
+            self.broker = True
             self.broker_info = {"id": info.id, "addr": info.addr, "port": info.port}
             self.logger.info(f"Registered broker {info.id}")
 
@@ -126,10 +132,7 @@ class DiscoveryAppln:
         self.logger.info("DiscoveryAppln::handle_lookup")
         self.lookup_count += 1
 
-        # Read dissemination strategy from config
-        config = configparser.ConfigParser()
-        config.read("config.ini")
-        dissemination = config["Dissemination"]["Strategy"]
+        dissemination = self.dissemination
 
         # Convert publisher info to RegistrantInfo objects
         matching_publishers = []
@@ -183,6 +186,7 @@ class DiscoveryAppln:
             is_ready = (
                 self.registered_publishers == self.expected_publishers
                 and self.registered_subscribers == self.expected_subscribers
+                and (self.dissemination != "ViaBroker" or self.broker)
                 # TODO: add a branch for broker
             )
 
