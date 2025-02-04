@@ -13,6 +13,7 @@ from enum import Enum
 from SubscriberMW import SubscriberMW
 from CS6381_MW import discovery_pb2
 from topic_selector import TopicSelector
+import pdb
 
 
 class SubscriberAppln:
@@ -20,9 +21,10 @@ class SubscriberAppln:
         INITIALIZE = 0
         CONFIGURE = 1
         REGISTER = 2
-        LOOKUP = 3
-        LISTENING = 4
-        COMPLETED = 5
+        ISREADY = 3
+        LOOKUP = 4
+        LISTENING = 5
+        COMPLETED = 6
 
     def __init__(self, logger):
         self.state = self.State.INITIALIZE
@@ -31,7 +33,7 @@ class SubscriberAppln:
         self.mw_obj = None
         self.logger = logger
         self.lookup_attempts = 0
-        self.max_lookup_attempts = 3
+        self.max_lookup_attempts = 30
         self.received_publications = {}  # Track received publications per topic
 
     def configure(self, args):
@@ -82,6 +84,21 @@ class SubscriberAppln:
             self.logger.error(f"Exception in driver: {str(e)}")
             raise e
 
+    def isready_response(self, isready_resp):
+        try:
+            self.logger.info("SubscriberAppln::isready_response")
+            if isready_resp.status:  # Assuming status is a boolean or equivalent (True means ready)
+                self.logger.info("System is ready; moving to lookup state.")
+                self.state = self.State.LOOKUP
+            else:
+                self.logger.info("System not ready yet; will retry isready query.")
+                time.sleep(1)  # Wait a bit before retrying
+            return 0
+        except Exception as e:
+            self.logger.error(f"Exception in isready_response: {str(e)}")
+            raise e
+ 
+
     def invoke_operation(self):
         try:
             self.logger.info("SubscriberAppln::invoke_operation")
@@ -90,6 +107,11 @@ class SubscriberAppln:
                 # Register with discovery service
                 self.logger.debug("SubscriberAppln::invoke_operation - Registering")
                 self.mw_obj.register(self.name, self.topiclist)
+                return None
+
+            elif self.state == self.State.ISREADY:
+                self.logger.debug("SubscriberAppln::invoke_operation - Querying isready")
+                self.mw_obj.is_ready()
                 return None
 
             elif self.state == self.State.LOOKUP:
@@ -121,7 +143,7 @@ class SubscriberAppln:
                 self.logger.debug(
                     "SubscriberAppln::register_response - Registration successful"
                 )
-                self.state = self.State.LOOKUP
+                self.state = self.State.ISREADY
                 return 0
             else:
                 raise Exception(f"Registration failed: {register_resp.reason}")
@@ -217,6 +239,10 @@ def parseCmdLineArgs():
     )
 
     parser.add_argument(
+        "-t", "--time", type=int, default=15, help="Amount of time to run for"
+    )
+
+    parser.add_argument(
         "-l",
         "--loglevel",
         type=int,
@@ -263,7 +289,7 @@ def main():
 
         # Now invoke the driver program
         logger.debug("Main: invoke the subscriber appln driver")
-        sub_app.driver()
+        sub_app.driver() 
 
     except KeyboardInterrupt:
         logger.info("Subscriber Application - Interrupted by user")

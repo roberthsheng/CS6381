@@ -37,7 +37,7 @@ class DiscoveryMW:
             self.poller.register(self.rep, zmq.POLLIN)
 
             # Decide the binding string for the REP socket
-            bind_string = f"tcp://*:{args.port}"
+            bind_string = f"tcp://{args.addr}:{args.port}"
             self.rep.bind(bind_string)
 
             self.logger.info(
@@ -107,7 +107,7 @@ class DiscoveryMW:
                 timeout = self.upcall_obj.handle_register(disc_req.register_req)
 
                 # FIX: Send response back to publisher/subscriber
-                self.send_register_response(status=discovery_pb2.STATUS_SUCCESS)
+                # self.send_register_response(status=discovery_pb2.STATUS_SUCCESS)
 
             elif disc_req.msg_type == discovery_pb2.TYPE_ISREADY:
                 self.logger.info(

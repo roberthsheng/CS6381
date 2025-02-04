@@ -9,3 +9,9 @@
 // Let us use the Version 3 syntax
 syntax = "proto3";
 
+message Publication {
+    string publisher_id = 1;
+    string topic = 2;
+    string data = 3;
+    int64 timestamp = 4; // Timestamp in milliseconds since epoch
+}

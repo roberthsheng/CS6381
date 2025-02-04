@@ -28,7 +28,7 @@ class TopicSelector:
         # Define common topic groups to ensure overlap
         self.topic_groups = {
             "group1": ["Weather", "Sports"],
-            "group2": ["News", "Technology"],
+            "group2": ["News", "Technology", "Science", "Sports"],
             "group3": ["Stock", "Healthcare"],
             "group4": ["Traffic", "Entertainment"]
         }
@@ -55,7 +55,7 @@ class TopicSelector:
         random.seed(time.time())
         
         # First pick a topic group to ensure overlap
-        group = list(self.topic_groups.values())[hash(os.getpid()) % len(self.topic_groups)]
+        group = list(self.topic_groups.values())[1 % len(self.topic_groups)]
         
         # If we need more topics than the group provides, add some random ones
         result = group[:num_topics]
