@@ -172,6 +172,7 @@ class BrokerMW:
 
             # Log the message with timestamps (for debugging)
             send_time = pub_msg.timestamp
+            publisher_id = pub_msg.publisher_id
             recv_time = int(time.time() * 1000)
             latency = recv_time - send_time
             self.logger.debug(
@@ -179,7 +180,7 @@ class BrokerMW:
             )
 
             # Pass topic and data to the upcall
-            timeout = self.upcall_obj.handle_publication(pub_msg.topic, pub_msg.data, send_time)
+            timeout = self.upcall_obj.handle_publication(pub_msg.topic, pub_msg.data, send_time, publisher_id)
 
             return timeout
 
@@ -213,7 +214,7 @@ class BrokerMW:
         except Exception as e:
             raise e
 
-    def disseminate(self, topic, data, old_timestamp):
+    def disseminate(self, topic, data, old_timestamp, publisher_id):
         try:
             self.logger.debug("BrokerMW::disseminate")
 
@@ -221,7 +222,8 @@ class BrokerMW:
             pub_msg.publisher_id = "broker"
             pub_msg.topic = topic
             pub_msg.data = data
-            pub_msg.timestamp = int(time.time() * 1000)  # Time in milliseconds
+            pub_msg.timestamp = old_timestamp 
+            pub_msg.publisher_id = publisher_id
 
             buf2send = pub_msg.SerializeToString()
             self.pub.send_multipart([topic.encode("utf-8"), buf2send])
