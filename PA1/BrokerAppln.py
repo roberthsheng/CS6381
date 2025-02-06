@@ -156,10 +156,10 @@ class BrokerAppln:
             raise e
 
 
-    def handle_publication(self, topic, value):
+    def handle_publication(self, topic, value, old_timestamp):
         try:
            self.logger.debug(f"BrokerAppln::handle_publication: Topic: {topic}, Value: {value}")
-           self.mw_obj.disseminate(topic, value)
+           self.mw_obj.disseminate(topic, value, old_timestamp)
            return 0 # Continue listening
 
         except Exception as e:

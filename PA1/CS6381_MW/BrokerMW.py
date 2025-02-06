@@ -179,7 +179,7 @@ class BrokerMW:
             )
 
             # Pass topic and data to the upcall
-            timeout = self.upcall_obj.handle_publication(pub_msg.topic, pub_msg.data)
+            timeout = self.upcall_obj.handle_publication(pub_msg.topic, pub_msg.data, send_time)
 
             return timeout
 
@@ -213,7 +213,7 @@ class BrokerMW:
         except Exception as e:
             raise e
 
-    def disseminate(self, topic, data):
+    def disseminate(self, topic, data, old_timestamp):
         try:
             self.logger.debug("BrokerMW::disseminate")
 

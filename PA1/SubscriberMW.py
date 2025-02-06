@@ -38,12 +38,13 @@ def convert_record_to_point(record: Record) -> Point:
     
     # Map other data as fields.
     point.field("recv_time", record.recv_time)
+    point.field("publish_time", record.send_time)
     point.field("dissemination", record.dissemination)
     
     # Determine the timestamp. For example, convert send_time from epoch seconds to a datetime.
     # Adjust the conversion if send_time is in milliseconds.
-    timestamp = datetime.utcfromtimestamp(record.recv_time / 1000.0)
-    point.time(timestamp)
+    # timestamp = datetime.utcfromtimestamp(time.time() / 1000.0)
+    # point.time(timestamp)
     
     return point
 
@@ -304,6 +305,7 @@ class SubscriberMW:
         Non-blocking function that flushes all items currently in the queue
         to InfluxDB by spawning a background thread to perform the write.
         """
+        self.logger.info("SubscriberMW::flush_write_queue - writing to InfluxDB")
         points = []
 
         # Drain all items currently in the queue.
