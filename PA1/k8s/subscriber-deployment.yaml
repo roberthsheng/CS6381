@@ -1,10 +1,9 @@
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: subscriber
   namespace: pubsub-demo
 spec:
-  serviceName: "subscriber"
   replicas: 2
   selector:
     matchLabels:
@@ -34,21 +33,7 @@ spec:
             - "2"
             - "-l"
             - "10"
-          volumeMounts:
-            - name: config-volume
-              mountPath: /config
-            - name: sub-data
-              mountPath: /data
       volumes:
         - name: config-volume
           configMap:
             name: pubsub-config
-  volumeClaimTemplates:
-    - metadata:
-        name: sub-data
-      spec:
-        storageClassName: local-storage
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 1Gi
