@@ -2,3 +2,4 @@ pyzmq
 netifaces
 requests
 protobuf
+influxdb3-python

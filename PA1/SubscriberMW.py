@@ -10,8 +10,12 @@ import time
 import logging
 import csv
 import zmq
+from datetime import datetime
 import configparser
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from influxdb_client_3 import InfluxDBClient3, Point
+import threading
+import queue
 from CS6381_MW import discovery_pb2, topic_pb2
 
 @dataclass
@@ -22,6 +26,27 @@ class Record:
     send_time: int
     recv_time: int
     dissemination: str 
+
+def convert_record_to_point(record: Record) -> Point:
+    # Choose a measurement name for the data. Here we use "record".
+    point = Point("record")
+    
+    # Map fields to tags. Tags are indexed, so use them for identifiers.
+    point.tag("publisher_id", record.publisher_id)
+    point.tag("subscriber_id", record.subscriber_id)
+    point.tag("topic", record.topic)
+    
+    # Map other data as fields.
+    point.field("recv_time", record.recv_time)
+    point.field("publish_time", record.send_time)
+    point.field("dissemination", record.dissemination)
+    
+    # Determine the timestamp. For example, convert send_time from epoch seconds to a datetime.
+    # Adjust the conversion if send_time is in milliseconds.
+    # timestamp = datetime.utcfromtimestamp(time.time() / 1000.0)
+    # point.time(timestamp)
+    
+    return point
 
 class SubscriberMW:
     def __init__(self, logger):
@@ -43,6 +68,15 @@ class SubscriberMW:
             self.logger.info("SubscriberMW::configure")
             self.name = args.name
 
+            # set up influxdb client
+            token =  "5EapoOGtPyx4TEPCDEMPiPN5n5KroFNwHfHneEfZC5HKDSwrJA1zgrThvmPJXEGJ_LXqOUMq0e0hrsANTuBxRQ=="
+            org = "CS6381"
+            host = "https://us-east-1-1.aws.cloud2.influxdata.com"
+
+            self.influx_client = InfluxDBClient3(host=host, token=token, org=org)
+            self.database = "CS6381"
+            self.write_queue = queue.Queue()
+
             # Read dissemination strategy from config
             config = configparser.ConfigParser()
             config.read("config.ini")
@@ -52,10 +86,10 @@ class SubscriberMW:
             self.write_interval = args.time
 
             # Setup the CSV file for data logging
-            filename = f"/data/{args.name}_data.csv"
-            self.csv_file = open(filename, 'w', newline='')
-            self.csv_writer = csv.writer(self.csv_file)
-            self.csv_writer.writerow(["publisher_id", "subscriber_id", "topic", "send_time", "recv_time", "broker_recv_time", "broker_send_time", "dissemination"])
+            # filename = f"./data/{args.name}_data.csv"
+            # self.csv_file = open(filename, 'w', newline='')
+            # self.csv_writer = csv.writer(self.csv_file)
+            # self.csv_writer.writerow(["publisher_id", "subscriber_id", "topic", "send_time", "recv_time", "broker_recv_time", "broker_send_time", "dissemination"])
 
             # Get ZMQ context
             context = zmq.Context()
@@ -102,7 +136,7 @@ class SubscriberMW:
                     raise Exception("Unknown event")
 
                 if time.time() - last_write_time >= self.write_interval:
-                    self.write_records()
+                    self.flush_write_queue()
                     last_write_time = time.time()
 
             self.logger.info("SubscriberMW::event_loop - done")
@@ -204,7 +238,7 @@ class SubscriberMW:
                     recv_time = recv_time,
                     dissemination = self.dissemination
             )
-            self.records.append(record)
+            self.write_queue.put(record)
             self.logger.debug(f"Received publication on topic {pub_msg.topic}, latency: {latency} ms")
 
             # Pass topic and data to the upcall
@@ -266,27 +300,43 @@ class SubscriberMW:
     def disable_event_loop(self):
         self.handle_events = False
 
-    def write_records(self):
-        self.logger.info("SubscriberMW::cleanup")
-        
-        # Write the data log to a csv file.
-        if self.records:
-            # Convert Record objects to list for CSV writing
-            rows = [
-                [
-                rec.publisher_id,
-                rec.subscriber_id,
-                rec.topic,
-                rec.send_time,
-                rec.recv_time,
-                rec.dissemination
-            ] for rec in self.records]
-            self.csv_writer.writerows(rows)
+    def flush_write_queue(self):
+        """
+        Non-blocking function that flushes all items currently in the queue
+        to InfluxDB by spawning a background thread to perform the write.
+        """
+        self.logger.info("SubscriberMW::flush_write_queue - writing to InfluxDB")
+        points = []
 
-            self.logger.info(f"Wrote collected data to {self.csv_file.name}")
+        # Drain all items currently in the queue.
+        while True:
+            try:
+                datapoint = self.write_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            point = convert_record_to_point(datapoint)
+
+            points.append(point)
+            self.write_queue.task_done()
+
+        # If there are points to write, spawn a background thread.
+        if points:
+            thread = threading.Thread(target=self._write_points, args=(points,), daemon=True)
+            thread.start()
+
+    def _write_points(self, points):
+        """
+        Worker function that writes a list of points to InfluxDB.
+        This runs in its own thread.
+        """
+        try:
+            self.influx_client.write(database=self.database, record=points)
+        except Exception as e:
+            # Handle exceptions as needed (e.g., log the error, retry, etc.)
+            print("Error writing to InfluxDB:", e)
+
     
-
-
     def cleanup(self):
         try:
             self.logger.info("SubscriberMW::cleanup")

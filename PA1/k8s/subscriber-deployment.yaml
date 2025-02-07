@@ -33,15 +33,7 @@ spec:
             - "2"
             - "-l"
             - "10"
-          volumeMounts:
-            - name: config-volume
-              mountPath: /config
-            - name: sub-data
-              mountPath: /data
       volumes:
         - name: config-volume
           configMap:
             name: pubsub-config
-        - name: sub-data 
-          persistentVolumeClaim:
-            claimName: subscriber-data-pvc

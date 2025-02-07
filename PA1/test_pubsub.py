@@ -149,8 +149,8 @@ def test_broker_dissemination(logger):
         harness.start_subscriber("sub2", topics=2)
 
         # Let the system run for a while
-        logger.info("System running - waiting 30 seconds")
-        time.sleep(30)
+        logger.info("System running - waiting 90 seconds")
+        time.sleep(90)
 
     except Exception as e:
         logger.error(f"Exception in test: {str(e)}")
