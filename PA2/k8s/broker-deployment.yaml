@@ -1,42 +1,37 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: publisher
+  name: broker
   namespace: pubsub-demo
 spec:
-  replicas: 50
+  replicas: 1
   selector:
     matchLabels:
-      app: publisher
+      app: broker
   template:
     metadata:
       labels:
-        app: publisher
+        app: broker
     spec:
       containers:
-        - name: publisher
+        - name: broker
           image: ghcr.io/d-zg/pubsub:latest
-          env:
-            - name: DISCOVERY_ADDRESS
-              value: "discovery-svc:5555"
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-          command: ["python3", "PublisherAppln.py"]
+          command: ["python3", "BrokerAppln.py"]
           args:
+            - "-n"
+            - "broker"
             - "-d"
             - "discovery-svc:5555"
-            - "-n"
-            - "pub$(POD_NAME)"
+            - "-c"
+            - "/config/config.ini"
+            - "-a"
+            - "0.0.0.0"
             - "-p"
-            - "5556"
-            - "-T"
-            - "2"
+            - "5560"
             - "-l"
             - "10"
           ports:
-            - containerPort: 5556
+            - containerPort: 5560
           volumeMounts:
             - name: config-volume
               mountPath: /config
