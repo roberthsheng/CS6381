@@ -1,0 +1,17 @@
+// Course: CS6381 Distributed Systems Principles
+// Instructor: Aniruddha Gokhale
+// Created: Spring 2023
+//
+// Purpose:
+// Describe an initial schema for serializing topic names and their values. For assignment 1,
+// we are just using strings. But later assignments we will enhance it.
+
+// Let us use the Version 3 syntax
+syntax = "proto3";
+
+message Publication {
+    string publisher_id = 1;
+    string topic = 2;
+    string data = 3;
+    int64 timestamp = 4; // Timestamp in milliseconds since epoch
+}

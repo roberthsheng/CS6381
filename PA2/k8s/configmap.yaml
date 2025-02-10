@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pubsub-config
+  namespace: pubsub-demo
+data:
+  config.ini: |
+    [Discovery]
+    Strategy=Centralized
+
+    [Dissemination]
+    Strategy=ViaBroker
