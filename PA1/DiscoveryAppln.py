@@ -41,7 +41,7 @@ class DiscoveryAppln:
             self.state = self.State.CONFIGURE
             # Read dissemination strategy from config
             config = configparser.ConfigParser()
-            config.read("config.ini")
+            config.read(args.config)
             self.dissemination = config["Dissemination"]["Strategy"]
             self.broker = False # no broker yet 
 
@@ -255,6 +255,8 @@ def parseCmdLineArgs():
         default=1,
         help="Expected number of subscribers",
     )
+
+    parser.add_argument("-c", "--config", default="config.ini", help="configuration file (default: config.ini)")
 
     parser.add_argument(
         "-p",

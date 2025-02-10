@@ -4,7 +4,7 @@ metadata:
   name: publisher
   namespace: pubsub-demo
 spec:
-  replicas: 2
+  replicas: 50
   selector:
     matchLabels:
       app: publisher

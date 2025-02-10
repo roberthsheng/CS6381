@@ -4,7 +4,7 @@ metadata:
   name: subscriber
   namespace: pubsub-demo
 spec:
-  replicas: 2
+  replicas: 50
   selector:
     matchLabels:
       app: subscriber
