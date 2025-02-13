@@ -8,7 +8,6 @@ import os
 import sys
 import time
 import logging
-import csv
 import zmq
 from datetime import datetime
 import configparser
@@ -55,8 +54,6 @@ class SubscriberMW:
         self.broker_binding = None  # Used in broker-based dissemination
         self.name = None
         self.records = []
-        self.csv_file = None
-        self.csv_writer = None
         self.dissemination = None
         self.publishers = None
         self.zk = None
@@ -163,7 +160,7 @@ class SubscriberMW:
             last_write_time = time.time()
             self.logger.info("SubscriberMW::event_loop - start")
             # Set a default timeout if None is provided
-            default_timeout = 500  # in milliseconds
+            default_timeout = 500 # in milliseconds
 
             while self.handle_events:
                 # Use a default timeout if none is provided
@@ -355,7 +352,8 @@ class SubscriberMW:
 
     def _write_points(self, points):
         try:
-            self.influx_client.write(database=self.database, record=points)
+            for point in points:
+                self.influx_client.write(database=self.database, record=points)
         except Exception as e:
             print("Error writing to InfluxDB:", e)
 
@@ -363,14 +361,6 @@ class SubscriberMW:
         try:
             self.logger.info("SubscriberMW::cleanup")
             
-            if self.records:
-                rows = [
-                   [rec.publisher_id, rec.subscriber_id, rec.topic, rec.send_time, rec.recv_time, rec.dissemination]
-                   for rec in self.records
-                ]
-                self.csv_writer.writerows(rows)
-                self.logger.info(f"Wrote collected data to {self.csv_file.name}")
-
             if self.sub:
                 self.sub.close()
             if self.req:
@@ -378,8 +368,6 @@ class SubscriberMW:
             if self.poller:
                 self.poller.unregister(self.sub)
                 self.poller.unregister(self.req)
-            if self.csv_file:
-                self.csv_file.close()
             if self.zk:
                 self.zk.stop()
         except Exception as e:
