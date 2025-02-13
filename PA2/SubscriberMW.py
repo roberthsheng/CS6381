@@ -14,6 +14,7 @@ from datetime import datetime
 import configparser
 from dataclasses import dataclass, asdict
 from influxdb_client_3 import InfluxDBClient3, Point
+from kazoo.client import KazooClient
 import threading
 import queue
 from CS6381_MW import discovery_pb2, topic_pb2
@@ -41,11 +42,6 @@ def convert_record_to_point(record: Record) -> Point:
     point.field("publish_time", record.send_time)
     point.field("dissemination", record.dissemination)
     
-    # Determine the timestamp. For example, convert send_time from epoch seconds to a datetime.
-    # Adjust the conversion if send_time is in milliseconds.
-    # timestamp = datetime.utcfromtimestamp(time.time() / 1000.0)
-    # point.time(timestamp)
-    
     return point
 
 class SubscriberMW:
@@ -62,13 +58,17 @@ class SubscriberMW:
         self.csv_file = None
         self.csv_writer = None
         self.dissemination = None
+        self.publishers = None
+        self.zk = None
 
     def configure(self, args):
         try:
             self.logger.info("SubscriberMW::configure")
             self.name = args.name
+            self.publishers = set()
 
             # set up influxdb client
+            self.logger.info("SubscriberMW - Connecting to influxdb")
             token =  "5EapoOGtPyx4TEPCDEMPiPN5n5KroFNwHfHneEfZC5HKDSwrJA1zgrThvmPJXEGJ_LXqOUMq0e0hrsANTuBxRQ=="
             org = "CS6381"
             host = "https://us-east-1-1.aws.cloud2.influxdata.com"
@@ -77,6 +77,13 @@ class SubscriberMW:
             self.database = "CS6381"
             self.write_queue = queue.Queue()
 
+            # connect to zk
+            self.zk = KazooClient(hosts=args.zk_addr)
+            self.zk.start()
+
+            # Set up the queue for ZooKeeper events
+            self.zk_event_queue = queue.Queue()
+
             # Read dissemination strategy from config
             config = configparser.ConfigParser()
             config.read("config.ini")
@@ -84,12 +91,6 @@ class SubscriberMW:
             self.dissemination = dissemination
 
             self.write_interval = args.time
-
-            # Setup the CSV file for data logging
-            # filename = f"./data/{args.name}_data.csv"
-            # self.csv_file = open(filename, 'w', newline='')
-            # self.csv_writer = csv.writer(self.csv_file)
-            # self.csv_writer.writerow(["publisher_id", "subscriber_id", "topic", "send_time", "recv_time", "broker_recv_time", "broker_send_time", "dissemination"])
 
             # Get ZMQ context
             context = zmq.Context()
@@ -112,26 +113,80 @@ class SubscriberMW:
         except Exception as e:
             raise e
 
+    def watch_for_broker(self):
+        """
+        Sets a ZooKeeper data watch on the /broker/primary znode.
+        If the node exists, we signal that the broker is available;
+        if it is missing or later deleted, we signal that the broker is unavailable.
+        """
+        self.logger.info("SubscriberMW::watch_for_broker - setting up watch on /broker/primary")
+        broker_node = "/broker/primary"
+
+        def broker_watch(data, stat, event):
+            # The initial callback is invoked with event==None.
+            if event is None:
+                if stat is None:
+                    self.logger.info("Broker znode /broker/primary does not exist initially.")
+                    self.zk_event_queue.put(("broker_not_available", None))
+                else:
+                    self.logger.info("Broker znode /broker/primary exists initially.")
+                    self.zk_event_queue.put(("broker_available", data))
+            else:
+                self.logger.info("Broker watch event: %s", event)
+                if event.type == "DELETED":
+                    self.logger.info("Broker znode /broker/primary has been deleted.")
+                    self.zk_event_queue.put(("broker_not_available", None))
+                elif event.type in ["CREATED", "CHANGED"]:
+                    self.logger.info("Broker znode /broker/primary has been created/changed.")
+                    self.zk_event_queue.put(("broker_available", data))
+            return True  # keep the watch active
+
+        self.zk.DataWatch(broker_node, broker_watch)
+
+    def disconnect_from_publishers(self):
+        """
+        When the broker is not available, we want to stop receiving publications.
+        Here we unsubscribe from all topics and clear the publisher list.
+        """
+        try:
+            self.logger.info("SubscriberMW::disconnect_from_publishers - disconnecting from publishers")
+            if self.upcall_obj and hasattr(self.upcall_obj, "topiclist"):
+                for topic in self.upcall_obj.topiclist:
+                    self.sub.setsockopt_string(zmq.UNSUBSCRIBE, topic)
+            # Clear publisher list so that on next lookup, we connect to fresh publishers.
+            self.publishers.clear()
+        except Exception as e:
+            self.logger.error(f"Exception in disconnect_from_publishers: {str(e)}")
+
     def event_loop(self, timeout=None):
         try:
             last_write_time = time.time()
             self.logger.info("SubscriberMW::event_loop - start")
+            # Set a default timeout if None is provided
+            default_timeout = 500  # in milliseconds
 
             while self.handle_events:
-                events = dict(self.poller.poll(timeout=timeout))
+                # Use a default timeout if none is provided
+                effective_timeout = timeout if timeout is not None else default_timeout
+                events = dict(self.poller.poll(timeout=effective_timeout))
+
+                # Process any ZooKeeper events from the watch.
+                while not self.zk_event_queue.empty():
+                    event_type, data = self.zk_event_queue.get_nowait()
+                    self.logger.info("Dequeued zk event: %s", event_type)
+                    if event_type == "broker_available":
+                        self.logger.info("Broker is now available. Initiating lookup...")
+                        self.upcall_obj.handle_broker_available()  # Trigger lookup.
+                    elif event_type == "broker_not_available":
+                        self.logger.info("Broker is no longer available. Transitioning to wait state.")
+                        self.upcall_obj.handle_broker_unavailable()
 
                 if not events:
-                    # Timeout occurred, let application decide what to do
                     timeout = self.upcall_obj.invoke_operation()
-
                 elif self.req in events:
-                    # Handle reply from discovery service
                     timeout = self.handle_discovery_reply()
-
                 elif self.sub in events:
-                    # Handle incoming publication
                     timeout = self.handle_publication()
-
                 else:
                     raise Exception("Unknown event")
 
@@ -204,8 +259,6 @@ class SubscriberMW:
                 timeout = self.upcall_obj.register_response(disc_resp.register_resp)
             elif disc_resp.msg_type == discovery_pb2.TYPE_LOOKUP_PUB_BY_TOPIC:
                 timeout = self.upcall_obj.lookup_response(disc_resp.lookup_resp)
-            elif disc_resp.msg_type == discovery_pb2.TYPE_ISREADY:
-                timeout = self.upcall_obj.isready_response(disc_resp.isready_resp)
             else:
                 raise ValueError("Unknown response type")
 
@@ -213,7 +266,6 @@ class SubscriberMW:
 
         except Exception as e:
             raise e
-
 
     def handle_publication(self):
         try:
@@ -249,43 +301,22 @@ class SubscriberMW:
         except Exception as e:
             raise e
 
-    def is_ready(self):
-        try:
-            self.logger.info("SubscriberMW::is_ready")
-            # Create isready request
-            isready_req = discovery_pb2.IsReadyReq()
-
-            # Create discovery request
-            disc_req = discovery_pb2.DiscoveryReq()
-            disc_req.msg_type = discovery_pb2.TYPE_ISREADY
-            disc_req.isready_req.CopyFrom(isready_req)
-
-            # Serialize and send the request
-            buf2send = disc_req.SerializeToString()
-            self.req.send(buf2send)
-        except Exception as e:
-            self.logger.error(f"SubscriberMW::is_ready - Exception: {str(e)}")
-            raise e
-
-
     def connect_to_publishers(self, publishers, topics):
         try:
             self.logger.info("SubscriberMW::connect_to_publishers")
-            # Connect to each publisher
+            # Connect to each publisher if not already connected.
             for pub in publishers:
-                # Access fields through protobuf getters
+                if pub.id in self.publishers:
+                    continue 
+                self.publishers.add(pub.id)
                 connect_str = f"tcp://{pub.addr}:{pub.port}"
                 self.sub.connect(connect_str)
-                self.logger.debug(
-                    f"Connected to publisher {pub.id} at {connect_str}"
-                )
+                self.logger.debug(f"Connected to publisher {pub.id} at {connect_str}")
 
-            # Subscribe to all topics
+            # Subscribe to all topics.
             for topic in topics:
                 self.logger.debug(f"Subscribing to topic: {topic}")
                 self.sub.setsockopt_string(zmq.SUBSCRIBE, topic)
-
-
 
         except Exception as e:
             self.logger.error(f"Error in connect_to_publishers: {str(e)}")
@@ -308,7 +339,6 @@ class SubscriberMW:
         self.logger.info("SubscriberMW::flush_write_queue - writing to InfluxDB")
         points = []
 
-        # Drain all items currently in the queue.
         while True:
             try:
                 datapoint = self.write_queue.get_nowait()
@@ -316,45 +346,29 @@ class SubscriberMW:
                 break
 
             point = convert_record_to_point(datapoint)
-
             points.append(point)
             self.write_queue.task_done()
 
-        # If there are points to write, spawn a background thread.
         if points:
             thread = threading.Thread(target=self._write_points, args=(points,), daemon=True)
             thread.start()
 
     def _write_points(self, points):
-        """
-        Worker function that writes a list of points to InfluxDB.
-        This runs in its own thread.
-        """
         try:
             self.influx_client.write(database=self.database, record=points)
         except Exception as e:
-            # Handle exceptions as needed (e.g., log the error, retry, etc.)
             print("Error writing to InfluxDB:", e)
 
-    
     def cleanup(self):
         try:
             self.logger.info("SubscriberMW::cleanup")
             
-            # Write the data log to a csv file.
             if self.records:
-                # Convert Record objects to list for CSV writing
                 rows = [
-                   [
-                    rec.publisher_id,
-                    rec.subscriber_id,
-                    rec.topic,
-                    rec.send_time,
-                    rec.recv_time,
-                    rec.dissemination
-                ] for rec in self.records]
+                   [rec.publisher_id, rec.subscriber_id, rec.topic, rec.send_time, rec.recv_time, rec.dissemination]
+                   for rec in self.records
+                ]
                 self.csv_writer.writerows(rows)
-
                 self.logger.info(f"Wrote collected data to {self.csv_file.name}")
 
             if self.sub:
@@ -366,6 +380,8 @@ class SubscriberMW:
                 self.poller.unregister(self.req)
             if self.csv_file:
                 self.csv_file.close()
+            if self.zk:
+                self.zk.stop()
         except Exception as e:
             self.logger.error(f"Error during cleanup: {str(e)}")
             raise e

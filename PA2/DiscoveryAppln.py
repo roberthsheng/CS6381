@@ -28,8 +28,6 @@ class DiscoveryAppln:
         self.logger = logger
         self.publishers = {}  # {topic: [publisher_info]}
         self.subscribers = {}  # {topic: [subscriber_info]}
-        self.expected_publishers = 0
-        self.expected_subscribers = 0
         self.registered_publishers = 0
         self.registered_subscribers = 0
         self.lookup_count = 0  # Track number of lookup requests
@@ -48,14 +46,6 @@ class DiscoveryAppln:
             # Initialize discovery middleware
             self.mw_obj = DiscoveryMW(self.logger)
             self.mw_obj.configure(args)
-
-            # Set expected counts
-            self.expected_publishers = args.publishers
-            self.expected_subscribers = args.subscribers
-
-            self.logger.info(
-                f"DiscoveryAppln::Expected publishers: {self.expected_publishers}, subscribers: {self.expected_subscribers}"
-            )
 
             self.logger.info("DiscoveryAppln::configure completed")
 
@@ -100,7 +90,7 @@ class DiscoveryAppln:
                     self.publishers[topic].append(
                         {"id": info.id, "addr": info.addr, "port": info.port}
                     )
-            self.registered_publishers += 1 # race condition possible
+            self.registered_publishers += 1 
             self.logger.info(f"Registered publisher {info.id} for topics {topics}")
 
         elif role == discovery_pb2.ROLE_SUBSCRIBER:
@@ -111,7 +101,7 @@ class DiscoveryAppln:
                 # Check for duplicate registration
                 if not any(s["id"] == info.id for s in self.subscribers[topic]):
                     self.subscribers[topic].append({"id": info.id})
-            self.registered_subscribers += 1 # this can lead to race conditions lol
+            self.registered_subscribers += 1 
             self.logger.info(f"Registered subscriber {info.id} for topics {topics}")
         elif role == discovery_pb2.ROLE_BOTH:
             # it's a broker
@@ -120,7 +110,7 @@ class DiscoveryAppln:
             self.logger.info(f"Registered broker {info.id}")
 
         self.logger.info(
-            f"Current registration status: {self.registered_publishers}/{self.expected_publishers} publishers, {self.registered_subscribers}/{self.expected_subscribers} subscribers"
+            f"Current registration status: {self.registered_publishers} publishers, {self.registered_subscribers} subscribers, {1 if self.broker else 0} brokers"
         )
 
         # Send success response
@@ -178,34 +168,6 @@ class DiscoveryAppln:
 
         return 0
 
-    def handle_isready(self, isready_req):
-        try:
-            self.logger.info("DiscoveryAppln::handle_isready")
-
-            # Check if all expected entities are registered
-            is_ready = (
-                self.registered_publishers == self.expected_publishers
-                and self.registered_subscribers == self.expected_subscribers
-                and (self.dissemination != "ViaBroker" or self.broker)
-                # TODO: add a branch for broker
-            )
-
-            if is_ready:
-                self.logger.info(
-                    "System is ready - all publishers and subscribers registered"
-                )
-            else:
-                self.logger.info(
-                    f"System not ready - waiting for {self.expected_publishers - self.registered_publishers} publishers and {self.expected_subscribers - self.registered_subscribers} subscribers"
-                )
-
-            self.mw_obj.send_isready_response(is_ready)
-
-            return 0
-
-        except Exception as e:
-            self.logger.error(f"Exception in handle_isready: {str(e)}")
-            raise e
 
     def invoke_operation(self):
         """Handle any periodic operations - in Discovery's case, just return None"""

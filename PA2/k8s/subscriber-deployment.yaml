@@ -4,7 +4,7 @@ metadata:
   name: subscriber
   namespace: pubsub-demo
 spec:
-  replicas: 50
+  replicas: 2
   selector:
     matchLabels:
       app: subscriber
@@ -16,6 +16,7 @@ spec:
       containers:
         - name: subscriber
           image: ghcr.io/d-zg/pubsub:latest
+          imagePullPolicy: IfNotPresent
           env:
             - name: DISCOVERY_ADDRESS
               value: "discovery-svc:5555"

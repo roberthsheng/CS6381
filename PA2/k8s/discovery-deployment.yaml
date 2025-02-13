@@ -16,6 +16,7 @@ spec:
       containers:
         - name: discovery
           image: ghcr.io/d-zg/pubsub:latest
+          imagePullPolicy: IfNotPresent
           command: ["python3", "DiscoveryAppln.py"]
           args:
             - "-a"
@@ -23,9 +24,9 @@ spec:
             - "-c"
             - "/config/config.ini"
             - "-P"
-            - "50"
+            - "2"
             - "-S"
-            - "50"
+            - "2"
             - "-p"
             - "5555"
             - "-l"

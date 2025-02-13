@@ -1,0 +1,15 @@
+apiVersion: skaffold/v2beta26
+kind: Config
+metadata:
+  name: pubsub-demo
+build:
+  artifacts:
+    - image: ghcr.io/d-zg/pubsub
+      context: .
+      docker:
+        dockerfile: Dockerfile
+deploy:
+  kubectl:
+    manifests:
+      - k8s/namespace.yaml
+      - k8s/*.yaml

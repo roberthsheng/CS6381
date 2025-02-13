@@ -98,6 +98,7 @@ class DiscoveryMW:
             self.logger.info(
                 f"DiscoveryMW::handle_request - Parsed request type: {disc_req.msg_type}"
             )
+            timeout = 0
 
             # Handle different message types
             if disc_req.msg_type == discovery_pb2.TYPE_REGISTER:
@@ -109,11 +110,6 @@ class DiscoveryMW:
                 # FIX: Send response back to publisher/subscriber
                 # self.send_register_response(status=discovery_pb2.STATUS_SUCCESS)
 
-            elif disc_req.msg_type == discovery_pb2.TYPE_ISREADY:
-                self.logger.info(
-                    "DiscoveryMW::handle_request - Handling TYPE_ISREADY request"
-                )
-                timeout = self.upcall_obj.handle_isready(disc_req.isready_req)
 
             elif disc_req.msg_type == discovery_pb2.TYPE_LOOKUP_PUB_BY_TOPIC:
                 self.logger.info(
@@ -161,31 +157,6 @@ class DiscoveryMW:
             )
             raise e
 
-    def send_isready_response(self, status):
-        try:
-            self.logger.info("DiscoveryMW::send_isready_response")
-
-            # Create isready response
-            isready_resp = discovery_pb2.IsReadyResp()
-            isready_resp.status = status
-
-            # Create discovery response
-            disc_resp = discovery_pb2.DiscoveryResp()
-            disc_resp.msg_type = discovery_pb2.TYPE_ISREADY
-            disc_resp.isready_resp.CopyFrom(isready_resp)
-
-            # Serialize and send
-            buf2send = disc_resp.SerializeToString()
-            self.rep.send(buf2send)
-            self.logger.info(
-                "DiscoveryMW::send_isready_response - Response sent successfully"
-            )
-
-        except Exception as e:
-            self.logger.error(
-                f"DiscoveryMW::send_isready_response - Exception: {str(e)}"
-            )
-            raise e
 
     def send_lookup_response(self, publisher_list):
         try:

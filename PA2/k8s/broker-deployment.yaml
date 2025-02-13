@@ -16,6 +16,7 @@ spec:
       containers:
         - name: broker
           image: ghcr.io/d-zg/pubsub:latest
+          imagePullPolicy: IfNotPresent
           command: ["python3", "BrokerAppln.py"]
           args:
             - "-n"
