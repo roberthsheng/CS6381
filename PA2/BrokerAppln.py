@@ -19,9 +19,10 @@ class BrokerAppln:
         INITIALIZE = 0
         CONFIGURE  = 1
         REGISTER   = 2
-        LOOKUP     = 3
-        RUNNING    = 4
-        COMPLETED  = 5
+        REGISTER_WAIT = 3
+        LOOKUP     = 4
+        RUNNING    = 5
+        COMPLETED  = 6
 
     def __init__(self, logger):
         self.state = self.State.INITIALIZE
@@ -73,6 +74,10 @@ class BrokerAppln:
             if self.state == self.State.REGISTER:
                 self.logger.debug("BrokerAppln::invoke_operation - Registering")
                 self.mw_obj.register(self.name)
+                self.state = self.State.REGISTER_WAIT
+                return None
+            elif self.state == self.State.REGISTER_WAIT:
+                self.logger.debug("BrokerAppln::invoke_operation - Waiting for register response")
                 return None
             elif self.state == self.State.LOOKUP:
                 self.logger.debug("BrokerAppln::invoke_operation - Looking up publishers")
@@ -104,6 +109,7 @@ class BrokerAppln:
                 raise Exception(f"Registration failed: {register_resp.reason}")
         except Exception as e:
             self.logger.error(f"Exception in register_response: {str(e)}")
+            # may want to handle gracefully and return to registser state to try again
             raise e
 
     def lookup_response(self, lookup_resp):
