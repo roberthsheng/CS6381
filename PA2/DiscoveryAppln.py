@@ -115,6 +115,7 @@ class DiscoveryAppln:
 
         # Send success response
         self.mw_obj.send_register_response(discovery_pb2.STATUS_SUCCESS)
+        self.mw_obj.persist_state_to_zk()
 
         return 0
 
@@ -209,6 +210,8 @@ def parseCmdLineArgs():
     )
 
     parser.add_argument ("-a", "--addr", default="localhost", help="IP addr of this service to advertise (default: localhost)")
+
+    parser.add_argument("-z", "--zk_addr", default="localhost:2181")
 
     parser.add_argument(
         "-S",
