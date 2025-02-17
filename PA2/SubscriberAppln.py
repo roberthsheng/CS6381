@@ -207,7 +207,6 @@ def parseCmdLineArgs():
     parser = argparse.ArgumentParser(description="Subscriber Application")
 
     parser.add_argument("-n", "--name", default="sub", help="Name of the subscriber")
-    parser.add_argument("-d", "--discovery", default="localhost:5555", help="Discovery service address")
     parser.add_argument("-z", "--zk_addr", default="localhost:2181", help="Zookeeper instance addr")
     parser.add_argument("-T", "--num_topics", type=int, default=1, help="Number of topics to subscribe")
     parser.add_argument("-t", "--time", type=int, default=15, help="Amount of time to run for")
