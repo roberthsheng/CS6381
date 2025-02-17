@@ -5,6 +5,7 @@
 ###############################################
 import pdb
 import os
+import socket
 import sys
 import time
 import logging
@@ -31,6 +32,7 @@ class DiscoveryMW:
         self.leader_sequence_num = None
         self.next_leader_candidate_path = None
         self.is_leader = False
+        self.address_info = None
 
     def configure(self, args):
         try:
@@ -52,6 +54,12 @@ class DiscoveryMW:
             # Decide the binding string for the REP socket
             bind_string = f"tcp://{args.addr}:{args.port}"
             self.rep.bind(bind_string)
+
+            # Record address info for other parties
+            self.address_info = {
+                "address": self.get_local_ip(),
+                "port": args.port
+            }
 
 
             self.logger.info(
@@ -104,7 +112,8 @@ class DiscoveryMW:
             self.logger.info("DiscoveryMW::_attempt_leader_election - Attempting to become leader")
             # Create an ephemeral sequential znode
             if not self.my_election_znode:
-                my_znode_path = self.zk.create(self.election_path + "/n_", ephemeral=True, sequence=True)
+                address_data = json.dumps(self.address_info).encode()
+                my_znode_path = self.zk.create(self.election_path + "/n_", address_data, ephemeral=True, sequence=True)
                 self.my_election_znode = my_znode_path
                 self.logger.debug(f"Created election znode: {my_znode_path}")
 
@@ -396,3 +405,15 @@ class DiscoveryMW:
                 self._handle_zk_error() # Handle ZK errors during persist
         else:
             self.logger.debug("DiscoveryMW::persist_state_to_zk - Not leader, skipping state persistence.")
+
+    def get_local_ip(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            # Connect to an external IP. The connection doesn't have to succeed.
+            s.connect(('8.8.8.8', 80))
+            ip_address = s.getsockname()[0]
+        except Exception:
+            ip_address = '127.0.0.1'
+        finally:
+            s.close()
+        return ip_address

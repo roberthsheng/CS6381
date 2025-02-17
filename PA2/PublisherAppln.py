@@ -77,7 +77,7 @@ class PublisherAppln:
             # Start the middleware event loop.
             self.mw_obj.event_loop(timeout=0)
             self.logger.info("PublisherAppln::driver completed")
-        except Exception as e:
+        except Exception as e: #TODO: don't need to re-register but should connect to the new correct discovery service address when it goes down
             raise e
 
     def invoke_operation(self):
