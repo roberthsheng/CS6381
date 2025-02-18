@@ -11,7 +11,7 @@ import time
 import logging
 import zmq
 import socket
-from kazoo.client import KazooClient
+from kazoo.client import KazooClient, NodeExistsError, NoNodeError
 import queue
 from CS6381_MW import discovery_pb2, topic_pb2
 
@@ -30,8 +30,12 @@ class BrokerMW:
         self.addr = None   # Broker's advertised address
         self.port = None   # Broker's publish port
         self.context = zmq.Context()
-        self.election_path = None
+        self.broker_election_path = None
+        self.discovery_election_path = None
         self.current_connect_str = None
+        self.my_election_znode = None # which znode i made for election
+        self.is_leader = False
+        self.leader_event = threading.Event()
 
     def configure(self, args):
         try:
@@ -39,11 +43,12 @@ class BrokerMW:
             # Set broker's bind address and publish port from command-line args.
             self.addr = args.addr
             self.port = args.port
-            self.election_path = "/discovery_election"
+            self.discovery_election_path = "/discovery_election"
+            self.broker_election_path = "/broker_election"
 
             # Setup ZooKeeper connection using provided zk_addr.
-            self.zk = KazooClient(hosts=args.zk_addr)
-            self.zk.start()
+            self.zk_addr = args.zk_addr
+            self._init_zk()
 
             # Setup ZMQ sockets.
             self.req = self.context.socket(zmq.REQ)
@@ -70,6 +75,142 @@ class BrokerMW:
             self.logger.error("Exception in BrokerMW::configure: " + str(e))
             raise e
 
+    def _init_zk(self):
+        """Initialize ZooKeeper connection and participate in leader election."""
+        try:
+            self.logger.info("DiscoveryMW::_init_zk - Connecting to ZooKeeper at {}".format(self.zk_addr))
+            self.zk = KazooClient(hosts=self.zk_addr)
+            self.zk.start(timeout=10) # Increased timeout for robustness
+
+            # Ensure election path exists
+            if not self.zk.exists(self.broker_election_path):
+                try:
+                    self.zk.create(self.broker_election_path, makepath=True)
+                    self.logger.info(f"Created election path: {self.broker_election_path}")
+                except NodeExistsError:
+                    self.logger.warning(f"Election path {self.broker_election_path} already exists, likely created concurrently.")
+
+
+            self._attempt_leader_election()
+
+        except Exception as e:
+            self.logger.error(f"DiscoveryMW::_init_zk - ZooKeeper initialization failed: {e}")
+            # Implement a zk error handler (e.g., retry, exit)
+            raise e
+
+    def _attempt_leader_election(self):
+        """Attempt to become the leader by creating an ephemeral sequential znode."""
+        try:
+            self.logger.info("DiscoveryMW::_attempt_leader_election - Attempting to become leader")
+            # Create an ephemeral sequential znode
+            if not self.my_election_znode:
+                my_znode_path = self.zk.create(self.broker_election_path + "/n_", ephemeral=True, sequence=True)
+                self.my_election_znode = my_znode_path
+                self.logger.debug(f"Created election znode: {my_znode_path}")
+
+            self._check_leadership()
+
+        except Exception as e:
+            self.logger.error(f"DiscoveryMW::_attempt_leader_election - Leader election attempt failed: {e}")
+            self._handle_zk_error()
+            # can handle here if u want
+            raise e
+
+    def _check_leadership(self):
+        """Determine if this instance is the leader and set up watcher if not."""
+        try:
+            children = self.zk.get_children(self.broker_election_path)
+            children.sort() # Sort to find the lowest sequence number
+
+            self.leader_sequence_num = int(self.my_election_znode.split("_")[-1])
+
+            # pdb.set_trace()
+            if self.my_election_znode == self.broker_election_path + "/" + children[0]: # Check if our znode is the first one
+                self.logger.info("DiscoveryMW::_check_leadership - I am the leader!")
+                self.become_leader()
+            else:
+                leader_znode_name = children[0]
+                self.logger.info(f"DiscoveryMW::_check_leadership - I am a replica. Current leader: {leader_znode_name}")
+                leader_seq_num = int(leader_znode_name.split("_")[-1])
+
+                # Find the znode just before ours in sequence
+                my_index = children.index(os.path.basename(self.my_election_znode))
+                if my_index > 0:
+                    prev_znode_name = children[my_index - 1]
+                    self.next_leader_candidate_path = self.broker_election_path + "/" + prev_znode_name
+                    self.logger.debug(f"Watching for deletion of: {self.next_leader_candidate_path}")
+                    self.zk.exists(self.next_leader_candidate_path, watch=self._leader_watcher) # Set watch on the previous znode
+                else: # We are the second in line, watching the current leader
+                    self.next_leader_candidate_path = self.broker_election_path + "/" + leader_znode_name
+                    self.logger.debug(f"Watching for deletion of leader: {self.next_leader_candidate_path}")
+                    self.zk.exists(self.next_leader_candidate_path, watch=self._leader_watcher)
+
+        except Exception as e:
+            self.logger.error(f"DiscoveryMW::_check_leadership - Error checking leadership: {e}")
+            raise e
+
+    def become_leader(self):
+        """Actions to perform when this instance becomes the leader."""
+        self.upcall_obj.began_running = time.time() 
+        if not self.is_leader:
+            self.logger.info("DiscoveryMW::become_leader - Transitioning to leader state.")
+            self.is_leader = True
+            self.leader_event.set()
+            # Optionally, perform any other leader-specific initialization here
+
+    def resign_leadership(self): # Optional - for graceful shutdown if needed
+        """Actions to perform when resigning leadership (e.g., during shutdown)."""
+        if self.is_leader:
+            self.logger.info("DiscoveryMW::resign_leadership - Resigning leadership.")
+            self.is_leader = False
+            if self.my_election_znode and self.zk.exists(self.my_election_znode):
+                self.zk.delete(self.my_election_znode)
+                self.logger.info(f"deleted ephemeral election node")
+
+            if self.zk.exists("/broker/primary"):
+                self.zk.delete("/broker/primary")
+                self.logger.info(f"deleted primary node")
+
+    def _leader_watcher(self, event):
+        """ZooKeeper watcher callback for leadership changes."""
+        try:
+            if event and event.type == "DELETED":
+                self.logger.info(f"DiscoveryMW::_leader_watcher - Watched znode {event.path} deleted. Previous leader might have failed.")
+                if not self.is_leader: # Avoid re-election if we are already leader (e.g., due to session timeout)
+                    self._attempt_leader_election() # Try to become the leader again
+
+            elif event is None: # Initial call of watcher, or node exists
+                exists = self.zk.exists(self.next_leader_candidate_path, watch=self._leader_watcher)
+                if not exists: # If the node disappeared between setting the watch and the callback
+                    self.logger.info(f"DiscoveryMW::_leader_watcher - Watched znode {self.next_leader_candidate_path} disappeared before callback, attempting leadership.")
+                    if not self.is_leader:
+                        self._attempt_leader_election()
+
+            else:
+                self.logger.debug(f"DiscoveryMW::_leader_watcher - Event: {event}") # Log other events if needed
+
+        except NoNodeError: # Possible race condition where the watched node is deleted very quickly
+            self.logger.warning("DiscoveryMW::_leader_watcher - Watched znode disappeared quickly, attempting leadership.")
+            if not self.is_leader:
+                self._attempt_leader_election()
+        except Exception as e:
+            self.logger.error(f"DiscoveryMW::_leader_watcher - Exception in watcher callback: {e}")
+            self._handle_zk_error() # Handle ZK errors in watcher too
+
+
+            # Optionally, clean up leader-specific resources
+
+    def _handle_zk_error(self):
+        """Handles ZooKeeper related errors. Implement retry/exit logic."""
+        self.logger.error("DiscoveryMW::_handle_zk_error - A ZooKeeper error occurred. System might be unstable.")
+        # Implement your error handling strategy. Options:
+        # 1. Retry connection/election after a delay
+        # 2. Disable leader features and run in a degraded mode
+        # 3. Terminate the application
+        # For now, let's just log and maybe implement retry later.
+        pass # Placeholder for error handling logic - TODO: Implement retry/exit strategy
+
+
     def wait_for_leader(self, check_interval=1):
         """
         Blocks until at least one child exists in the election path.
@@ -83,11 +224,11 @@ class BrokerMW:
 
         while True:
             try:
-                children = self.zk.get_children(self.election_path, watch=leader_watch)
+                children = self.zk.get_children(self.discovery_election_path, watch=leader_watch)
                 if children:
                     # Sort children to determine the leader
                     children.sort()
-                    leader_znode = self.election_path + "/" + children[0]
+                    leader_znode = self.discovery_election_path + "/" + children[0]
                     return leader_znode
                 else:
                     # No leader yet; wait for the event to trigger a change
@@ -105,10 +246,10 @@ class BrokerMW:
         This is non-blocking; ZooKeeper will call the provided callback when a change occurs.
         """
         try:
-            children = self.zk.get_children(self.election_path, watch=self._leader_watch_callback)
+            children = self.zk.get_children(self.discovery_election_path, watch=self._leader_watch_callback)
             if children:
                 children.sort()  # Leader is the one with the smallest sequence number
-                leader_znode = self.election_path + "/" + children[0]
+                leader_znode = self.discovery_election_path + "/" + children[0]
                 self.logger.info(f"Current leader: {leader_znode}")
                 self.connect_to_leader(leader_znode)
             else:
@@ -173,13 +314,13 @@ class BrokerMW:
         # When a watch is triggered, we need to re-read the election path.
         # (Note: watches are one-shot, so we must set a new one.)
         try:
-            children = self.zk.get_children(self.election_path, watch=self._leader_watch_callback)
+            children = self.zk.get_children(self.discovery_election_path, watch=self._leader_watch_callback)
             if not children:
                 self.logger.info("No candidates in election path yet.")
                 return
 
             children.sort()
-            new_leader_znode = self.election_path + "/" + children[0]
+            new_leader_znode = self.discovery_election_path + "/" + children[0]
             self.logger.info(f"New leader detected: {new_leader_znode}")
             self.update_leader_connection(new_leader_znode)
         except Exception as e:
@@ -322,6 +463,7 @@ class BrokerMW:
     def cleanup(self):
         try:
             self.logger.info("BrokerMW::cleanup")
+            self.resign_leadership()
             if self.sub:
                 self.sub.close()
             if self.pub:
@@ -330,7 +472,36 @@ class BrokerMW:
                 self.req.close()
             if self.zk:
                 self.zk.stop()
-            self.context.term()
+            
+            # 3. Terminate the ZMQ context (make sure you store it during configuration)
+            if hasattr(self, "context") and self.context:
+                self.context.term()
+                self.logger.info("DiscoveryMW::cleanup - ZMQ context terminated.")
+                self.context = None
+
+            # 4. Clean up the poller (unregister sockets if needed)
+            if self.poller:
+                # Unregister any sockets; poller cleanup is not as critical since it's managed in Python.
+                try:
+                    self.poller.unregister(self.rep)
+                except Exception:
+                    pass  # Socket may already be unregistered/closed.
+                self.poller = None
+
+
+
+            # 5. Clean up the ZooKeeper connection.
+            self.zk.stop()
+            self.zk.close()
+            self.logger.info("Closed ZooKeeper connection.")
+
+            # At this point, all znodes and local middleware state are cleaned up.
+            # To rejoin the election, you can simply call your configuration method again,
+            # which will create a new ephemeral sequential node and reinitialize the state.
+
         except Exception as e:
             self.logger.error("Exception in BrokerMW::cleanup: " + str(e))
             raise e
+
+    def disable_event_loop(self):
+        self.handle_events = False

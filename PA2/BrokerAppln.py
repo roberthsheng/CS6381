@@ -31,11 +31,16 @@ class BrokerAppln:
         self.logger = logger
         self.max_lookup_attempts = 1
         self.lookup_attempts = 0
+        self.began_running = None
+        self.args = None
 
     def configure(self, args):
         try:
+            self.args = args
             self.logger.info("BrokerAppln::configure")
             self.state = self.State.CONFIGURE
+            
+            self.lease_duration = int(args.lease_duration)
 
             self.name = args.name
             # Parse configuration file
@@ -49,6 +54,7 @@ class BrokerAppln:
 
             # Initialize the middleware
             self.mw_obj = BrokerMW(self.logger)
+            self.mw_obj.set_upcall_handle(self)
             self.mw_obj.configure(args)
             
             self.logger.info("BrokerAppln::configure completed")
@@ -60,7 +66,13 @@ class BrokerAppln:
     def driver(self):
         try:
             self.logger.info("BrokerAppln::driver")
-            self.mw_obj.set_upcall_handle(self)
+
+            # Block here until leadership is acquired
+            if not self.mw_obj.is_leader:
+                self.logger.info("DiscoveryAppln::driver - Waiting to become leader...")
+                self.mw_obj.leader_event.wait()  # This call blocks until the event is set
+                self.logger.info("DiscoveryAppln::driver - Leadership acquired, proceeding.")
+            
             self.state = self.State.REGISTER
             self.mw_obj.event_loop(timeout=0)
             self.logger.info("BrokerAppln::driver completed")
@@ -70,6 +82,18 @@ class BrokerAppln:
 
     def invoke_operation(self):
         try:
+            self.logger.debug("DiscoveryAppln::invoke_operation")
+            elapsed = time.time() - self.began_running
+            if elapsed > self.lease_duration:
+                self.logger.info(f"Lease expired (elapsed: {elapsed:.2f} sec), calling reset.")
+                
+                # Disable the current event loop
+                if self.mw_obj:
+                    self.mw_obj.disable_event_loop()  # This should allow the event_loop() to exit.
+                
+                # Reset the application.
+                # (Assuming self.args has been saved during configure so you can reuse it.)
+                self.reset()
             self.logger.info("BrokerAppln::invoke_operation")
             if self.state == self.State.REGISTER:
                 self.logger.debug("BrokerAppln::invoke_operation - Registering")
@@ -155,15 +179,27 @@ class BrokerAppln:
             self.logger.error(f"Exception in handle_publishers_update: {str(e)}")
             raise e
 
-    def cleanup(self):
+    def reset(self):
         try:
             self.logger.info("BrokerAppln::cleanup")
             if self.mw_obj:
                 self.mw_obj.cleanup()
-            self.state = self.State.COMPLETED
         except Exception as e:
             self.logger.error(f"Exception in cleanup: {str(e)}")
             raise e
+        self.mw_obj = None
+
+        self.state = self.State.INITIALIZE
+        self.logger.info("BrokerAppln::reset - State set to INITIALIZE.")
+
+        try:
+            self.configure(self.args)
+            self.driver()
+        except Exception as e:
+            self.logger.error(f"BrokerAppln::reset - Error during reinitialization: {e}")
+
+    def cleanup(self):
+        self.logger.info("placeholder")
 
 def parseCmdLineArgs():
     parser = argparse.ArgumentParser(description="Broker Application")
@@ -173,6 +209,8 @@ def parseCmdLineArgs():
     
     parser.add_argument("-d", "--discovery", default="localhost:5555",
                         help="Discovery service address")
+
+    parser.add_argument("-t", "--lease_duration", default=15, help="max time this can be primary")
     
     parser.add_argument("-c", "--config", default="config.ini",
                         help="Configuration file (default: config.ini)")
