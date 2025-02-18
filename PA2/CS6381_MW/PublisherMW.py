@@ -8,8 +8,10 @@ import os
 import sys
 import time
 import logging
+import json
 import zmq
 import socket
+import threading
 import configparser
 from CS6381_MW import discovery_pb2, topic_pb2
 from kazoo.client import KazooClient
@@ -29,6 +31,8 @@ class PublisherMW:
         # For broker availability monitoring via ZooKeeper
         self.zk = None
         self.zk_event_queue = None
+        self.election_path = None
+        self.current_connect_str = None
 
     def configure(self, args):
         try:
@@ -38,6 +42,13 @@ class PublisherMW:
             self.port = args.port
             self.addr = socket.gethostbyname(socket.gethostname())
             self.name = args.name
+
+            # Set up ZooKeeper to watch for the discovery/broker’s znode.
+            self.logger.info("PublisherMW::configure - connecting to ZooKeeper")
+            self.zk = KazooClient(hosts=args.zk_addr)
+            self.zk.start()
+            self.zk_event_queue = queue.Queue()
+            self.election_path = "/discovery_election"
 
             # Get the ZMQ context and poller
             context = zmq.Context()
@@ -52,24 +63,168 @@ class PublisherMW:
 
             # Connect to the discovery service
             self.logger.debug("PublisherMW::configure - connecting to Discovery service")
-            connect_str = f"tcp://{args.discovery}"
-            self.req.connect(connect_str)
+            leader_znode_path = self.wait_for_leader() # block until there's a discovery service
+            self.connect_to_leader(leader_znode_path) # connect to it
 
             # Bind the PUB socket for dissemination
             self.logger.debug("PublisherMW::configure - binding to PUB socket")
             bind_string = f"tcp://*:{self.port}"
             self.pub.bind(bind_string)
 
-            # Set up ZooKeeper to watch for the broker’s znode.
-            self.logger.info("PublisherMW::configure - connecting to ZooKeeper")
-            self.zk = KazooClient(hosts=args.zk_addr)
-            self.zk.start()
-            self.zk_event_queue = queue.Queue()
-
+            # Watch discovery if it dies
+            self.logger.info("PublisherMW::configure - watching for discovery changes")
+            self.watch_leader() 
             self.logger.info("PublisherMW::configure completed")
 
         except Exception as e:
             raise e
+
+    def wait_for_leader(self, check_interval=1):
+        """
+        Blocks until at least one child exists in the election path.
+        Returns the leader's full znode path (the one with the smallest sequence number).
+        """
+        leader_found = threading.Event()
+
+        def leader_watch(event):
+            # This callback will be invoked when a change happens
+            leader_found.set()
+
+        while True:
+            try:
+                children = self.zk.get_children(self.election_path, watch=leader_watch)
+                if children:
+                    # Sort children to determine the leader
+                    children.sort()
+                    leader_znode = self.election_path + "/" + children[0]
+                    return leader_znode
+                else:
+                    # No leader yet; wait for the event to trigger a change
+                    leader_found.wait(timeout=check_interval)
+                    # Clear the event and loop again to check for a leader
+                    leader_found.clear()
+            except Exception as e:
+                # Handle connection errors or other issues as needed
+                print(f"Error checking election path: {e}")
+                time.sleep(check_interval)
+
+
+    def watch_leader(self):
+        """
+        Sets a watch on the leader's znode by watching the children of the election path.
+        This is non-blocking; ZooKeeper will call the provided callback when a change occurs.
+        """
+        try:
+            children = self.zk.get_children(self.election_path, watch=self._leader_watch_callback)
+            if children:
+                children.sort()  # Leader is the one with the smallest sequence number
+                leader_znode = self.election_path + "/" + children[0]
+                self.logger.info(f"Current leader: {leader_znode}")
+                self.connect_to_leader(leader_znode)
+            else:
+                self.logger.info("No leader found. Waiting for leader to be elected...")
+        except Exception as e:
+            self.logger.error(f"Error setting watch on leader: {e}")
+
+    def read_discovery_znode(self, leader_znode_path):
+            leader_data, leader_stat = self.zk.get(leader_znode_path)
+            if leader_data:
+                # Decode and parse the JSON data
+                leader_info = json.loads(leader_data.decode('utf-8'))
+                leader_address = leader_info.get("address")
+                leader_port = leader_info.get("port")
+                return leader_address, leader_port
+            raise ValueError("No data found in discovery leader znode")
+
+    def connect_to_leader(self, leader_znode_path):
+        """
+        Connects the REQ socket to the leader's discovery address.
+        """
+        try:
+            discovery_address, discovery_port = self.read_discovery_znode(leader_znode_path)
+            new_connect_str = f"tcp://{discovery_address}:{discovery_port}"
+            self.logger.info(f"Connecting to leader at {new_connect_str}")
+            self.req.connect(new_connect_str)
+            self.current_connect_str = new_connect_str
+        except Exception as e:
+            self.logger.error(f"Failed to connect to leader: {e}")
+
+    def update_leader_connection(self, new_leader_znode):
+        """
+        Disconnects from the old leader (if connected) and connects to the new leader.
+        """
+        try:
+            new_address, new_port = self.read_discovery_znode(new_leader_znode)
+            new_connect_str = f"tcp://{new_address}:{new_port}"
+
+            # Only change if it's a different endpoint than the current one
+            if self.current_connect_str and self.current_connect_str != new_connect_str:
+                self.logger.info(f"Disconnecting from old leader at {self.current_connect_str}")
+                self.req.disconnect(self.current_connect_str)
+                self.logger.info(f"Connecting to new leader at {new_connect_str}")
+                self.req.connect(new_connect_str)
+                self.current_connect_str = new_connect_str
+            elif not self.current_connect_str:
+                # First time connecting.
+                self.logger.info(f"Connecting to leader at {new_connect_str}")
+                self.req.connect(new_connect_str)
+                self.current_connect_str = new_connect_str
+            else:
+                self.logger.info("Already connected to the correct leader.")
+        except Exception as e:
+            self.logger.error(f"Error updating leader connection: {e}")
+
+    def _leader_watch_callback(self, event):
+        """
+        This callback is invoked when the children of the election path change.
+        It will disconnect from the current leader (if any) and connect to the new leader.
+        """
+        self.logger.info(f"ZooKeeper watch triggered: {event}")
+        # When a watch is triggered, we need to re-read the election path.
+        # (Note: watches are one-shot, so we must set a new one.)
+        try:
+            children = self.zk.get_children(self.election_path, watch=self._leader_watch_callback)
+            if not children:
+                self.logger.info("No candidates in election path yet.")
+                return
+
+            children.sort()
+            new_leader_znode = self.election_path + "/" + children[0]
+            self.logger.info(f"New leader detected: {new_leader_znode}")
+            self.update_leader_connection(new_leader_znode)
+        except Exception as e:
+            self.logger.error(f"Error in leader watch callback: {e}")
+
+    def watch_for_broker(self):
+        """
+        Sets a ZooKeeper data watch on the /broker/primary znode.
+        If the node exists, we signal that the broker is available;
+        if it is missing or later deleted, we signal that the broker is unavailable.
+        """
+        self.logger.info("SubscriberMW::watch_for_broker - setting up watch on /broker/primary")
+        broker_node = "/broker/primary"
+
+        def broker_watch(data, stat, event):
+            # The initial callback is invoked with event==None.
+            if event is None:
+                if stat is None:
+                    self.logger.info("Broker znode /broker/primary does not exist initially.")
+                    self.zk_event_queue.put(("broker_not_available", None))
+                else:
+                    self.logger.info("Broker znode /broker/primary exists initially.")
+                    self.zk_event_queue.put(("broker_available", data))
+            else:
+                self.logger.info("Broker watch event: %s", event)
+                if event.type == "DELETED":
+                    self.logger.info("Broker znode /broker/primary has been deleted.")
+                    self.zk_event_queue.put(("broker_not_available", None))
+                elif event.type in ["CREATED", "CHANGED"]:
+                    self.logger.info("Broker znode /broker/primary has been created/changed.")
+                    self.zk_event_queue.put(("broker_available", data))
+            return True  # keep the watch active
+
+        self.zk.DataWatch(broker_node, broker_watch)
+
 
     def watch_for_broker(self):
         """

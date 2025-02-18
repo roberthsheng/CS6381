@@ -23,9 +23,10 @@ class PublisherAppln:
         INITIALIZE = 0
         CONFIGURE = 1
         REGISTER = 2
-        BROKER_WAIT = 3
-        DISSEMINATE = 4
-        COMPLETED = 5
+        REGISTER_WAIT = 3
+        BROKER_WAIT = 4
+        DISSEMINATE = 5
+        COMPLETED = 6
 
     def __init__(self, logger):
         self.state = self.State.INITIALIZE
@@ -87,6 +88,11 @@ class PublisherAppln:
                 self.logger.info("PublisherAppln::invoke_operation - registering with the discovery service")
                 self.mw_obj.register(self.name, self.topiclist)
                 # After registration, transition to waiting for broker
+                self.state = self.State.REGISTER_WAIT
+                return None
+
+            elif self.state == self.State.REGISTER_WAIT:
+                self.logger.debug("PublisherAppln::invoke_operation - Waiting for registration")
                 return None
 
             elif self.state == self.State.BROKER_WAIT:

@@ -3,6 +3,7 @@
 # Purpose: Subscriber middleware implementation
 #
 ###############################################
+import pdb
 import json
 import os
 import sys
@@ -108,8 +109,9 @@ class SubscriberMW:
             self.poller.register(self.req, zmq.POLLIN)
             self.poller.register(self.sub, zmq.POLLIN)
 
-            self.logger.info("SubscriberMW::configure completed")
+            self.logger.info("SubscriberMW::configure - watching for discovery changes")
             self.watch_leader()
+            self.logger.info("SubscriberMW::configure completed")
 
         except Exception as e:
             raise e
