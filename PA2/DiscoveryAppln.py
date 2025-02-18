@@ -113,7 +113,10 @@ class DiscoveryAppln:
             self.logger.info(f"Registered subscriber {info.id} for topics {topics}")
         elif role == discovery_pb2.ROLE_BOTH:
             # it's a broker
-            self.broker = True
+            if not self.broker:
+                self.broker = True
+            else:
+                self.logger.info("overwrote previous broker")
             self.broker_info = {"id": info.id, "addr": info.addr, "port": info.port}
             self.logger.info(f"Registered broker {info.id}")
 

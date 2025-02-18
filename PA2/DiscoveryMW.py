@@ -370,6 +370,7 @@ class DiscoveryMW:
                 state = json.loads(data.decode()) # Assuming state is stored as JSON
                 self.upcall_obj.publishers = state.get('publishers', {}) # Restore publishers dict in Appln
                 self.upcall_obj.subscribers = state.get('subscribers', {}) # Restore subscribers dict in Appln
+                self.upcall_obj.broker_info = state.get('broker', None) # restore broker info if it's there
                 self.upcall_obj.registered_publishers = state.get('registered_publishers', 0) # Restore registered publishers count
                 self.upcall_obj.registered_subscribers = state.get('registered_subscribers', 0) # Restore registered subscribers count
                 self.upcall_obj.lookup_count = state.get('lookup_count', 0) # Restore lookup count
@@ -394,6 +395,7 @@ class DiscoveryMW:
                 state = { # Gather state from the application layer
                     'publishers': self.upcall_obj.publishers,
                     'subscribers': self.upcall_obj.subscribers,
+                    'broker': self.upcall_obj.broker_info,
                     'registered_publishers': self.upcall_obj.registered_publishers,
                     'registered_subscribers': self.upcall_obj.registered_subscribers,
                     'lookup_count': self.upcall_obj.lookup_count
