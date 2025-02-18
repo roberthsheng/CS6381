@@ -9,6 +9,7 @@ import socket
 import sys
 import time
 import logging
+import threading
 import zmq
 from kazoo.client import KazooClient, NoNodeError, NodeExistsError
 import json # For state serialization
@@ -33,6 +34,7 @@ class DiscoveryMW:
         self.next_leader_candidate_path = None
         self.is_leader = False
         self.address_info = None
+        self.leader_event = threading.Event()
 
     def configure(self, args):
         try:
@@ -122,7 +124,7 @@ class DiscoveryMW:
 
         except Exception as e:
             self.logger.error(f"DiscoveryMW::_attempt_leader_election - Leader election attempt failed: {e}")
-            self._handle_zk_error(e)
+            self._handle_zk_error()
             # can handle here if u want
             raise e
 
@@ -161,11 +163,12 @@ class DiscoveryMW:
 
     def become_leader(self):
         """Actions to perform when this instance becomes the leader."""
+        self.upcall_obj.began_running = time.time() 
         if not self.is_leader:
             self.logger.info("DiscoveryMW::become_leader - Transitioning to leader state.")
             self.is_leader = True
+            self.leader_event.set()
             self.restore_state_from_zk() # Restore state from ZooKeeper
-
             # Optionally, perform any other leader-specific initialization here
 
     def resign_leadership(self): # Optional - for graceful shutdown if needed
@@ -201,7 +204,6 @@ class DiscoveryMW:
             self.logger.error(f"DiscoveryMW::_leader_watcher - Exception in watcher callback: {e}")
             self._handle_zk_error() # Handle ZK errors in watcher too
 
-
     def _handle_zk_error(self):
         """Handles ZooKeeper related errors. Implement retry/exit logic."""
         self.logger.error("DiscoveryMW::_handle_zk_error - A ZooKeeper error occurred. System might be unstable.")
@@ -218,7 +220,7 @@ class DiscoveryMW:
             self.logger.info("DiscoveryMW::event_loop - start")
 
             while self.handle_events:
-                events = dict(self.poller.poll(timeout=timeout))
+                events = dict(self.poller.poll(timeout=50))
 
                 if not events:
                     timeout = self.upcall_obj.invoke_operation()
@@ -384,7 +386,6 @@ class DiscoveryMW:
             self._handle_zk_error() # Handle ZK errors during restore
             # In case of restore failure, it's critical - consider app termination or degraded mode.
 
-
     def persist_state_to_zk(self):
         """Persist current state to ZooKeeper. To be implemented."""
         if self.is_leader: # Only leader persists state
@@ -417,3 +418,52 @@ class DiscoveryMW:
         finally:
             s.close()
         return ip_address
+
+    def cleanup(self):
+        """Clean up middleware state by deleting znodes and resetting the election state."""
+        try:
+            self.logger.info("DiscoveryMW::cleanup - Cleaning up all ZooKeeper state.")
+
+            # 1. Delete the ephemeral election znode (if it exists).
+            if self.my_election_znode and self.zk.exists(self.my_election_znode):
+                self.zk.delete(self.my_election_znode)
+                self.logger.info(f"Deleted ephemeral election znode: {self.my_election_znode}")
+                self.my_election_znode = None
+
+            #  Stop the event loop
+            self.handle_events = False
+
+            # 2. Close the REP socket if it exists.
+            if self.rep:
+                # Close immediately (linger=0 ensures pending messages are discarded)
+                self.rep.close(linger=0)
+                self.logger.info("DiscoveryMW::cleanup - REP socket closed.")
+                self.rep = None
+
+            # 3. Terminate the ZMQ context (make sure you store it during configuration)
+            if hasattr(self, "context") and self.context:
+                self.context.term()
+                self.logger.info("DiscoveryMW::cleanup - ZMQ context terminated.")
+                self.context = None
+
+            # 4. Clean up the poller (unregister sockets if needed)
+            if self.poller:
+                # Unregister any sockets; poller cleanup is not as critical since it's managed in Python.
+                try:
+                    self.poller.unregister(self.rep)
+                except Exception:
+                    pass  # Socket may already be unregistered/closed.
+                self.poller = None
+
+
+
+            # 5. Clean up the ZooKeeper connection.
+            self.zk.stop()
+            self.zk.close()
+            self.logger.info("Closed ZooKeeper connection.")
+
+            # At this point, all znodes and local middleware state are cleaned up.
+            # To rejoin the election, you can simply call your configuration method again,
+            # which will create a new ephemeral sequential node and reinitialize the state.
+        except Exception as e:
+            self.logger.error(f"DiscoveryMW::cleanup - Exception during cleanup: {e}")

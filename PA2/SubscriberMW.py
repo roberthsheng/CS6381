@@ -146,7 +146,6 @@ class SubscriberMW:
                 print(f"Error checking election path: {e}")
                 time.sleep(check_interval)
 
-
     def watch_leader(self):
         """
         Sets a watch on the leader's znode by watching the children of the election path.

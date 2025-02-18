@@ -3,7 +3,7 @@
 # Purpose: Discovery application implementation
 #
 ###############################################
-
+import pdb
 import os
 import sys
 import time
@@ -31,11 +31,15 @@ class DiscoveryAppln:
         self.registered_publishers = 0
         self.registered_subscribers = 0
         self.lookup_count = 0  # Track number of lookup requests
+        self.began_running = None # tracks current life as primary
+        self.lease_duration = None
 
     def configure(self, args):
         try:
             self.logger.info("DiscoveryAppln::configure")
 
+            self.args = args
+            self.lease_duration = int(args.lease_duration)
             self.state = self.State.CONFIGURE
             # Read dissemination strategy from config
             config = configparser.ConfigParser()
@@ -45,6 +49,7 @@ class DiscoveryAppln:
 
             # Initialize discovery middleware
             self.mw_obj = DiscoveryMW(self.logger)
+            self.mw_obj.set_upcall_handle(self)
             self.mw_obj.configure(args)
 
             self.logger.info("DiscoveryAppln::configure completed")
@@ -57,8 +62,11 @@ class DiscoveryAppln:
         try:
             self.logger.info("DiscoveryAppln::driver")
 
-            # Set upcall handle
-            self.mw_obj.set_upcall_handle(self)
+            # Block here until leadership is acquired
+            if not self.mw_obj.is_leader:
+                self.logger.info("DiscoveryAppln::driver - Waiting to become leader...")
+                self.mw_obj.leader_event.wait()  # This call blocks until the event is set
+                self.logger.info("DiscoveryAppln::driver - Leadership acquired, proceeding.")
 
             # Set to running state
             self.state = self.State.RUNNING
@@ -174,6 +182,17 @@ class DiscoveryAppln:
         """Handle any periodic operations - in Discovery's case, just return None"""
         try:
             self.logger.debug("DiscoveryAppln::invoke_operation")
+            elapsed = time.time() - self.began_running
+            if elapsed > self.lease_duration:
+                self.logger.info(f"Lease expired (elapsed: {elapsed:.2f} sec), calling reset.")
+                
+                # Disable the current event loop
+                if self.mw_obj:
+                    self.mw_obj.disable_event_loop()  # This should allow the event_loop() to exit.
+                
+                # Reset the application.
+                # (Assuming self.args has been saved during configure so you can reuse it.)
+                self.reset()
             return None  # No periodic actions needed for discovery service
 
         except Exception as e:
@@ -201,6 +220,40 @@ class DiscoveryAppln:
             self.logger.error(f"Exception in cleanup: {str(e)}")
             raise e
 
+    def reset(self):
+        """
+        Reset the application to the INITIALIZE state and re-run configuration and event loop.
+        """
+        args = self.args
+        self.logger.info("DiscoveryAppln::reset - Resetting application state.")
+
+        # 1. Clean up the middleware (which cleans up znodes and the ZooKeeper connection)
+        if self.mw_obj:
+            try:
+                self.mw_obj.cleanup()
+            except Exception as e:
+                self.logger.error(f"DiscoveryAppln::reset - Error during middleware cleanup: {e}")
+            self.mw_obj = None
+
+        # 2. Clear application-level state
+        self.publishers.clear()
+        self.subscribers.clear()
+        self.registered_publishers = 0
+        self.registered_subscribers = 0
+        self.lookup_count = 0
+
+        # 3. Reset the state to INITIALIZE
+        self.state = self.State.INITIALIZE
+        self.logger.info("DiscoveryAppln::reset - State set to INITIALIZE.")
+
+        # 4. Re-run configuration and the driver (which reinitializes the middleware)
+        try:
+            self.configure(args)
+            self.driver()
+        except Exception as e:
+            self.logger.error(f"DiscoveryAppln::reset - Error during reinitialization: {e}")
+
+
 
 def parseCmdLineArgs():
     parser = argparse.ArgumentParser(description="Discovery Application")
@@ -210,6 +263,8 @@ def parseCmdLineArgs():
     )
 
     parser.add_argument ("-a", "--addr", default="localhost", help="IP addr of this service to advertise (default: localhost)")
+
+    parser.add_argument("-t", "--lease_duration", default=15, help="max time this can be primary")
 
     parser.add_argument("-z", "--zk_addr", default="localhost:2181")
 
