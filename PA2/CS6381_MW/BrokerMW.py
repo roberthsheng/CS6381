@@ -47,7 +47,7 @@ class BrokerMW:
 
             # Setup ZMQ sockets.
             self.req = self.context.socket(zmq.REQ)
-            leader_znode_path = self.wait_for_leader()
+            leader_znode_path = self.wait_for_leader() # wait for discovery leader
             self.connect_to_leader(leader_znode_path)
 
             # Create a SUB socket to receive publications from publishers.

@@ -35,8 +35,9 @@ class TestHarness:
             "DiscoveryAppln.py",
             "-P", str(num_pubs),
             "-S", str(num_subs),
+            "-t", str(100),
             "-p", str(port),
-            "-l", str(logging.DEBUG)
+            "-l", str(logging.INFO)
         ]
         self.logger.info(f"Starting Discovery Service: {' '.join(cmd)}")
         proc = subprocess.Popen(cmd)

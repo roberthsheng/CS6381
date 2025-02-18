@@ -13,7 +13,7 @@ import configparser
 from enum import Enum
 from CS6381_MW.BrokerMW import BrokerMW
 from CS6381_MW import discovery_pb2
-
+# TODO: implement leader election and resigning here
 class BrokerAppln:
     class State(Enum):
         INITIALIZE = 0
