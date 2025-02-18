@@ -57,7 +57,8 @@ class DiscoveryMW:
 
             # Record address info for other parties
             self.address_info = {
-                "address": self.get_local_ip(),
+                # "address": self.get_local_ip(),
+                "address": args.addr, 
                 "port": args.port
             }
 
@@ -365,7 +366,6 @@ class DiscoveryMW:
             # pdb.set_trace()
             if data:
                 state = json.loads(data.decode()) # Assuming state is stored as JSON
-                pdb.set_trace()
                 self.upcall_obj.publishers = state.get('publishers', {}) # Restore publishers dict in Appln
                 self.upcall_obj.subscribers = state.get('subscribers', {}) # Restore subscribers dict in Appln
                 self.upcall_obj.registered_publishers = state.get('registered_publishers', 0) # Restore registered publishers count
