@@ -26,20 +26,20 @@ COPY . .
 # (Optional) Install Apache ZooKeeper 3.8.4 for testing purposes.
 # In production, you would run ZooKeeper as a separate service.
 # Install Apache ZooKeeper 3.8.4
-ENV ZK_VERSION=3.8.4
-ENV ZK_HOME=/opt/zookeeper
-RUN mkdir -p /tmp/zookeeper
+# ENV ZK_VERSION=3.8.4
+# ENV ZK_HOME=/opt/zookeeper
+# RUN mkdir -p /tmp/zookeeper
 
-RUN wget https://downloads.apache.org/zookeeper/zookeeper-${ZK_VERSION}/apache-zookeeper-${ZK_VERSION}-bin.tar.gz \
-    && tar xvzf apache-zookeeper-${ZK_VERSION}-bin.tar.gz -C /opt/ \
-    && mv /opt/apache-zookeeper-${ZK_VERSION}-bin ${ZK_HOME} \
-    && rm apache-zookeeper-${ZK_VERSION}-bin.tar.gz \
-    # Copy the sample configuration to the expected file
-    && cp ${ZK_HOME}/conf/zoo_sample.cfg ${ZK_HOME}/conf/zoo.cfg
+# RUN wget https://downloads.apache.org/zookeeper/zookeeper-${ZK_VERSION}/apache-zookeeper-${ZK_VERSION}-bin.tar.gz \
+#     && tar xvzf apache-zookeeper-${ZK_VERSION}-bin.tar.gz -C /opt/ \
+#     && mv /opt/apache-zookeeper-${ZK_VERSION}-bin ${ZK_HOME} \
+#     && rm apache-zookeeper-${ZK_VERSION}-bin.tar.gz \
+#     # Copy the sample configuration to the expected file
+#     && cp ${ZK_HOME}/conf/zoo_sample.cfg ${ZK_HOME}/conf/zoo.cfg
 
 
-# Add ZooKeeper's bin directory to PATH (for local testing or manual invocation)
-ENV PATH="${ZK_HOME}/bin:${PATH}"
+# # Add ZooKeeper's bin directory to PATH (for local testing or manual invocation)
+# ENV PATH="${ZK_HOME}/bin:${PATH}"
 
 # Expose the ports your application uses and ZooKeeper's default port (if needed)
 EXPOSE 5555
@@ -47,6 +47,3 @@ EXPOSE 5556
 EXPOSE 5560
 EXPOSE 2181
 
-# Set the default command to run only your Python application.
-# ZooKeeper will be managed as a separate pod/service in production.
-CMD ["python3", "app.py"]
