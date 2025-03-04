@@ -175,9 +175,21 @@ class BrokerMW:
         """ZooKeeper watcher callback for leadership changes."""
         try:
             if event and event.type == "DELETED":
-                self.logger.info(f"DiscoveryMW::_leader_watcher - Watched znode {event.path} deleted. Previous leader might have failed.")
-                if not self.is_leader: # Avoid re-election if we are already leader (e.g., due to session timeout)
-                    self._attempt_leader_election() # Try to become the leader again
+                self.logger.info(f"DiscoveryMW::_leader_watcher - Watched znode {event.path} deleted.")
+                self.logger.info("Attempting to become the new leader...")
+                # Force a re-check of all children to ensure proper election
+                children = self.zk.get_children(self.broker_election_path)
+                children.sort()
+                
+                # Check if we might be the new leader based on current nodes
+                if children and os.path.basename(self.my_election_znode) == children[0]:
+                    self.logger.info("I might be the new leader - attempting election")
+                
+                if not self.is_leader:
+                    self._attempt_leader_election()
+                    # Verify success after attempt
+                    time.sleep(0.5)  # Small delay to let ZK propagate changes
+                    self._check_leadership()  # Double-check leadership status
 
             elif event is None: # Initial call of watcher, or node exists
                 exists = self.zk.exists(self.next_leader_candidate_path, watch=self._leader_watcher)
@@ -201,14 +213,26 @@ class BrokerMW:
             # Optionally, clean up leader-specific resources
 
     def _handle_zk_error(self):
-        """Handles ZooKeeper related errors. Implement retry/exit logic."""
-        self.logger.error("DiscoveryMW::_handle_zk_error - A ZooKeeper error occurred. System might be unstable.")
-        # Implement your error handling strategy. Options:
-        # 1. Retry connection/election after a delay
-        # 2. Disable leader features and run in a degraded mode
-        # 3. Terminate the application
-        # For now, let's just log and maybe implement retry later.
-        pass # Placeholder for error handling logic - TODO: Implement retry/exit strategy
+        """Handles ZooKeeper related errors with basic retry logic."""
+        self.logger.error("DiscoveryMW::_handle_zk_error - A ZooKeeper error occurred.")
+        
+        # Check ZooKeeper connection
+        if self.zk.state != 'CONNECTED':
+            self.logger.info("ZooKeeper disconnected. Attempting to reconnect...")
+            try:
+                self.zk.stop()
+                self.zk.close()
+                time.sleep(1)
+                self.zk = KazooClient(hosts=self.zk_addr)
+                self.zk.start(timeout=10)
+                
+                # Reinitialize election participation
+                self.my_election_znode = None  # Reset so we create a new one
+                self._attempt_leader_election()
+                self.logger.info("Successfully reconnected to ZooKeeper")
+            except Exception as e:
+                self.logger.error(f"Failed to reconnect to ZooKeeper: {e}")
+                # In a real system, you might want to exit here if critical
 
 
     def wait_for_leader(self, check_interval=1):
@@ -285,23 +309,41 @@ class BrokerMW:
         Disconnects from the old leader (if connected) and connects to the new leader.
         """
         try:
-            new_address, new_port = self.read_discovery_znode(new_leader_znode)
-            new_connect_str = f"tcp://{new_address}:{new_port}"
-
-            # Only change if it's a different endpoint than the current one
-            if self.current_connect_str and self.current_connect_str != new_connect_str:
-                self.logger.info(f"Disconnecting from old leader at {self.current_connect_str}")
-                self.req.disconnect(self.current_connect_str)
-                self.logger.info(f"Connecting to new leader at {new_connect_str}")
-                self.req.connect(new_connect_str)
-                self.current_connect_str = new_connect_str
-            elif not self.current_connect_str:
-                # First time connecting.
-                self.logger.info(f"Connecting to leader at {new_connect_str}")
-                self.req.connect(new_connect_str)
-                self.current_connect_str = new_connect_str
-            else:
-                self.logger.info("Already connected to the correct leader.")
+            # Retry logic for reading znode data
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    new_address, new_port = self.read_discovery_znode(new_leader_znode)
+                    new_connect_str = f"tcp://{new_address}:{new_port}"
+                    
+                    self.logger.info(f"Reconnecting to new leader at {new_connect_str}, attempt {attempt+1}")
+                    
+                    # Disconnect from old leader if needed
+                    if self.current_connect_str and self.current_connect_str != new_connect_str:
+                        try:
+                            self.req.disconnect(self.current_connect_str)
+                        except Exception as e:
+                            self.logger.warning(f"Error disconnecting from old leader: {e}")
+                            
+                        # Create a new socket to ensure clean connection
+                        self.req.close()
+                        self.req = self.context.socket(zmq.REQ)
+                    
+                    # Connect to new leader
+                    self.req.connect(new_connect_str)
+                    self.current_connect_str = new_connect_str
+                    self.logger.info(f"Successfully connected to new leader at {new_connect_str}")
+                    
+                    # Try a simple message to verify connection
+                    # self.register(self.id)  # Re-register with new leader
+                    
+                    return  # Success
+                    
+                except Exception as e:
+                    self.logger.error(f"Error connecting to leader, attempt {attempt+1}: {e}")
+                    time.sleep(1)  # Backoff before retry
+                    
+            self.logger.error("Failed to connect to new leader after multiple attempts")
         except Exception as e:
             self.logger.error(f"Error updating leader connection: {e}")
 
