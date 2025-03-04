@@ -16,13 +16,17 @@ spec:
       containers:
         - name: discovery
           image: ghcr.io/d-zg/pubsub:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           command: ["python3", "DiscoveryAppln.py"]
           args:
             - "-a"
-            - "0.0.0.0"
+            - "discovery-svc"
             - "-c"
             - "/config/config.ini"
+            - "-z"
+            - "zookeeper-svc:2181"
+            - "-t"
+            - "2000"
             - "-P"
             - "2"
             - "-S"

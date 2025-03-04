@@ -16,13 +16,12 @@ spec:
       containers:
         - name: broker
           image: ghcr.io/d-zg/pubsub:latest
-          imagePullPolicy: IfNotPresent
           command: ["python3", "BrokerAppln.py"]
           args:
             - "-n"
             - "broker"
-            - "-d"
-            - "discovery-svc:5555"
+            - "-z"
+            - "zookeeper-svc:2181"
             - "-c"
             - "/config/config.ini"
             - "-a"

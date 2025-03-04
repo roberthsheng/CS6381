@@ -16,7 +16,6 @@ spec:
       containers:
         - name: subscriber
           image: ghcr.io/d-zg/pubsub:latest
-          imagePullPolicy: IfNotPresent
           env:
             - name: DISCOVERY_ADDRESS
               value: "discovery-svc:5555"
@@ -28,6 +27,8 @@ spec:
           args:
             - "-d"
             - "discovery-svc:5555"
+            - "-z"
+            - "zookeeper-svc:2181"
             - "-n"
             - "sub$(POD_NAME)"
             - "-T"
