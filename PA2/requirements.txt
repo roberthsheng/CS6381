@@ -1,6 +1,6 @@
 pyzmq
 netifaces
 requests
-protobuf
+protobuf==3.20.3
 influxdb3-python
 kazoo

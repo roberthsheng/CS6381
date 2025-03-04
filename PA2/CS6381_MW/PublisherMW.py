@@ -40,10 +40,10 @@ class PublisherMW:
 
             # Initialize our variables
             self.port = args.port
-            self.addr = socket.gethostbyname(socket.gethostname())
+            self.addr = args.addr
             self.name = args.name
 
-            # Set up ZooKeeper to watch for the discovery/broker’s znode.
+            # Set up ZooKeeper to watch for the discovery/broker's znode.
             self.logger.info("PublisherMW::configure - connecting to ZooKeeper")
             self.zk = KazooClient(hosts=args.zk_addr)
             self.zk.start()

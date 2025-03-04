@@ -44,30 +44,31 @@ class PublisherAppln:
     def configure(self, args):
         try:
             self.logger.info("PublisherAppln::configure")
+            self.logger.info(f"I am here!!")
             self.state = self.State.CONFIGURE
             self.name = args.name
             self.iters = args.iters
             self.frequency = args.frequency
             self.num_topics = args.num_topics
 
-            self.logger.debug("PublisherAppln::configure - parsing config.ini")
+            self.logger.info("PublisherAppln::configure - parsing config.ini")
             config = configparser.ConfigParser()
             config.read(args.config)
             self.lookup = config["Discovery"]["Strategy"]
             self.dissemination = config["Dissemination"]["Strategy"]
 
-            self.logger.debug("PublisherAppln::configure - selecting our topic list")
+            self.logger.info("PublisherAppln::configure - selecting our topic list")
             ts = TopicSelector()
             self.topiclist = ts.interest(self.num_topics)
 
-            self.logger.debug("PublisherAppln::configure - initializing the middleware object")
+            self.logger.info("PublisherAppln::configure - initializing the middleware object")
             self.mw_obj = PublisherMW(self.logger)
             self.mw_obj.set_upcall_handle(self)
+            self.logger.info(f"PublisherAppln::configure - using ZK: {args.zk_addr}, Discovery: {args.discovery}")
             self.mw_obj.configure(args)
-
             self.logger.info("PublisherAppln::configure - configuration complete")
-
         except Exception as e:
+            self.logger.error(f"PublisherAppln::configure - exception: {str(e)}")
             raise e
 
     def driver(self):

@@ -1,0 +1,2 @@
+ssh -i /Users/reedandreas/.ssh/S25_CS6381.pem cc@192.168.5.14
+Remove runtime version from topic.proto and discovery.proto
