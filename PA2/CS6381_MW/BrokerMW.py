@@ -69,25 +69,21 @@ class BrokerMW:
 
     def _init_zk(self):
         try:
-            self.logger.info("DiscoveryMW::_init_zk - Connecting to ZooKeeper at {}".format(self.zk_addr))
+            self.logger.info("BrokerMW::_init_zk - Connecting to ZooKeeper at {}".format(self.zk_addr))
             self.zk = KazooClient(hosts=self.zk_addr)
+            self.logger.debug("BrokerMW::_init_zk - Starting ZooKeeper client")
             self.zk.start(timeout=10)
+            self.logger.debug(f"BrokerMW::_init_zk - Checking path: {self.broker_election_path}, type: {type(self.broker_election_path)}")
             if not self.zk.exists(self.broker_election_path):
-                try:
-                    self.zk.create(self.broker_election_path, value=b"", makepath=True)
-                    self.logger.info(f"Created election path: {self.broker_election_path}")
-                except NodeExistsError:
-                    self.logger.warning(f"Election path {self.broker_election_path} already exists")
+                self.logger.debug("BrokerMW::_init_zk - Creating election path")
+                self.zk.create(self.broker_election_path, value=b"", makepath=True)
+                self.logger.info(f"BrokerMW::_init_zk - Created election path: {self.broker_election_path}")
+            else:
+                self.logger.debug(f"BrokerMW::_init_zk - Path {self.broker_election_path} already exists")
+            self.logger.debug("BrokerMW::_init_zk - Attempting leader election")
             self._attempt_leader_election()
         except Exception as e:
-            self.logger.error(f"DiscoveryMW::_init_zk - ZooKeeper initialization failed: {e}")
-            raise e
-
-            self._attempt_leader_election()
-
-        except Exception as e:
-            self.logger.error(f"DiscoveryMW::_init_zk - ZooKeeper initialization failed: {e}")
-            # Implement a zk error handler (e.g., retry, exit)
+            self.logger.error(f"BrokerMW::_init_zk - ZooKeeper initialization failed: {e}")
             raise e
 
     def _attempt_leader_election(self):
