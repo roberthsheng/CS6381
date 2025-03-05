@@ -38,75 +38,55 @@ class DiscoveryMW:
 
     def configure(self, args):
         try:
-            self.logger.info("DiscoveryMW::configure")
-
-            # Store ZooKeeper address
+            self.logger.info("BrokerMW::configure")
+            self.addr = args.addr
+            self.port = args.port
+            self.discovery_election_path = "/discovery_election"
+            self.broker_election_path = "/broker_election"  # Set before _init_zk
             self.zk_addr = args.zk_addr
-
-            # Get ZMQ context
-            context = zmq.Context()
-
-            # Create REP socket for handling requests
-            self.rep = context.socket(zmq.REP)
-
-            # Get the poller object
-            self.poller = zmq.Poller()
-            self.poller.register(self.rep, zmq.POLLIN)
-
-            # Decide the binding string for the REP socket
-            bind_string = f"tcp://{args.addr}:{args.port}"
-            self.rep.bind(bind_string)
-
-            # Record address info for other parties
-            self.address_info = {
-                # "address": self.get_local_ip(),
-                "address": args.addr, 
-                "port": args.port
-            }
-
-
-            self.logger.info(
-                f"DiscoveryMW::configure - Listening on {bind_string}, connecting to ZK at {self.zk_addr}"
-            )
-
-            # Initialize ZooKeeper connection and leader election
+            self.logger.debug(f"BrokerMW::configure - Paths set: broker={self.broker_election_path}, discovery={self.discovery_election_path}")
             self._init_zk()
-            self.logger.info(
-                f"DiscoveryMW::configure completed. Listening on {bind_string}"
-            )
 
+            self.req = self.context.socket(zmq.REQ)
+            leader_znode_path = self.wait_for_leader()
+            self.connect_to_leader(leader_znode_path)
+
+            self.sub = self.context.socket(zmq.SUB)
+            self.sub.setsockopt_string(zmq.SUBSCRIBE, "")
+            self.sub.connect("tcp://10.0.0.5:5570")  # From your read branch
+            self.logger.info("BrokerMW::configure - SUB connected to tcp://10.0.0.5:5570")
+
+            self.pub = self.context.socket(zmq.PUB)
+            self.pub.bind(f"tcp://{self.addr}:{self.port}")
+
+            self.poller = zmq.Poller()
+            self.poller.register(self.req, zmq.POLLIN)
+            self.poller.register(self.sub, zmq.POLLIN)
+
+            self.logger.info("BrokerMW::configure - watching for discovery changes")
+            self.watch_leader()
+            self.logger.info("BrokerMW::configure completed")
         except Exception as e:
-            self.logger.error(f"DiscoveryMW::configure - Exception: {str(e)}")
+            self.logger.error("Exception in BrokerMW::configure: " + str(e))
             raise e
 
     def _init_zk(self):
-        """Initialize ZooKeeper connection and participate in leader election."""
         try:
-            self.logger.info("DiscoveryMW::_init_zk - Connecting to ZooKeeper at {}".format(self.zk_addr))
+            self.logger.info("BrokerMW::_init_zk - Connecting to ZooKeeper at {}".format(self.zk_addr))
             self.zk = KazooClient(hosts=self.zk_addr)
-            self.zk.start(timeout=10) # Increased timeout for robustness
-
-            # Ensure election path exists
-            if not self.zk.exists(self.election_path):
-                try:
-                    self.zk.create(self.election_path, makepath=True)
-                    self.logger.info(f"Created election path: {self.election_path}")
-                except NodeExistsError:
-                    self.logger.warning(f"Election path {self.election_path} already exists, likely created concurrently.")
-
-            # Ensure state path exists
-            if not self.zk.exists(self.state_path):
-                try:
-                    self.zk.create(self.state_path, b'{}', makepath=True) # Initialize with empty JSON object
-                    self.logger.info(f"Created state path: {self.state_path}")
-                except NodeExistsError:
-                    self.logger.warning(f"State path {self.state_path} already exists, likely created concurrently.")
-
+            self.logger.debug("BrokerMW::_init_zk - Starting ZooKeeper client")
+            self.zk.start(timeout=10)
+            self.logger.debug(f"BrokerMW::_init_zk - Checking path: {self.broker_election_path}, type: {type(self.broker_election_path)}")
+            if not self.zk.exists(self.broker_election_path):
+                self.logger.debug("BrokerMW::_init_zk - Creating election path")
+                self.zk.create(self.broker_election_path, value=b"", makepath=True)  # Fixed with value
+                self.logger.info(f"BrokerMW::_init_zk - Created election path: {self.broker_election_path}")
+            else:
+                self.logger.debug(f"BrokerMW::_init_zk - Path {self.broker_election_path} already exists")
+            self.logger.debug("BrokerMW::_init_zk - Attempting leader election")
             self._attempt_leader_election()
-
         except Exception as e:
-            self.logger.error(f"DiscoveryMW::_init_zk - ZooKeeper initialization failed: {e}")
-            # Implement a zk error handler (e.g., retry, exit)
+            self.logger.error(f"BrokerMW::_init_zk - ZooKeeper initialization failed: {e}")
             raise e
 
     def _attempt_leader_election(self):
