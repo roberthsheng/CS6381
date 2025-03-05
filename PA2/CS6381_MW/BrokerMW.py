@@ -171,8 +171,8 @@ class BrokerMW:
             self._handle_zk_error()
 
     def _monitor_replicas(self):
-        """Monitor the number of replicas and revive if necessary."""
         def replica_watcher(event):
+            self.logger.info(f"Replica watcher triggered: {event}")
             try:
                 children = self.zk.get_children(self.broker_election_path)
                 self.replica_count = len(children)
@@ -182,6 +182,8 @@ class BrokerMW:
                     self.revive_replica()
             except Exception as e:
                 self.logger.error(f"Error in replica watcher: {e}")
+        self.logger.info("Setting replica watch on /broker_election")
+        self.zk.get_children(self.broker_election_path, watch=replica_watcher)
 
         self.zk.get_children(self.broker_election_path, watch=replica_watcher)
 
