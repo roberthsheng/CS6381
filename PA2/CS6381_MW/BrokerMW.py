@@ -43,6 +43,9 @@ class BrokerMW:
             self.addr = args.addr
             self.port = args.port
             self.zk_addr = args.zk_addr
+            self.discovery_election_path = "/discovery_election"  # Keep this too
+            self.broker_election_path = "/broker_election"  # Match original intent
+            self.logger.debug(f"BrokerMW::configure - Paths set: broker={self.broker_election_path}, discovery={self.discovery_election_path}")
             self._init_zk()
             self.req = self.context.socket(zmq.REQ)
             leader_znode_path = self.wait_for_leader()
@@ -50,7 +53,7 @@ class BrokerMW:
 
             self.sub = self.context.socket(zmq.SUB)
             self.sub.setsockopt_string(zmq.SUBSCRIBE, "")
-            self.sub.connect("tcp://10.0.0.5:5570")  # Connect to Publisher
+            self.sub.connect("tcp://10.0.0.5:5570")
             self.logger.info("BrokerMW::configure - SUB connected to tcp://10.0.0.5:5570")
 
             self.pub = self.context.socket(zmq.PUB)
