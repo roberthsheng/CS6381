@@ -1,0 +1,30 @@
+h1 ifconfig h1-eth0 10.0.0.1/24
+h2 ifconfig h2-eth0 10.0.0.2/24
+h3 ifconfig h3-eth0 10.0.0.3/24
+h4 ifconfig h4-eth0 10.0.0.4/24
+h5 ifconfig h5-eth0 10.0.0.5/24
+
+h1 cp -r /home/cc/apache-zookeeper-3.8.4-bin .
+h1 apache-zookeeper-3.8.4-bin/bin/zkServer.sh start
+
+h2 /home/cc/CS6381/PA2/venv/bin/python3 /home/cc/CS6381/PA2/DiscoveryAppln.py -a 10.0.0.2 -p 5555 -z 10.0.0.1:2181 > h2_discovery.log 2>&1 &
+h3 /home/cc/CS6381/PA2/venv/bin/python3 /home/cc/CS6381/PA2/DiscoveryAppln.py -a 10.0.0.3 -p 5556 -z 10.0.0.1:2181 > h3_discovery.log 2>&1 &
+h4 /home/cc/CS6381/PA2/venv/bin/python3 /home/cc/CS6381/PA2/DiscoveryAppln.py -a 10.0.0.4 -p 5557 -z 10.0.0.1:2181 > h4_discovery.log 2>&1 &
+
+h4 /home/cc/CS6381/PA2/venv/bin/python3 /home/cc/CS6381/PA2/BrokerAppln.py -a 10.0.0.4 -p 5560 -z 10.0.0.1:2181 -n broker1 > h4_broker.log 2>&1 &
+
+h5 /home/cc/CS6381/PA2/venv/bin/python3 /home/cc/CS6381/PA2/PublisherAppln.py -a 10.0.0.5 -p 5570 -z 10.0.0.1:2181 -n pub1 -T 1 -d 10.0.0.2:5555 > h5_publisher.log 2>&1 &
+
+h3 /home/cc/CS6381/PA2/venv/bin/python3 /home/cc/CS6381/PA2/SubscriberAppln.py -a 10.0.0.3 -p 5580 -z 10.0.0.1:2181 -n sub1 -T 1 -d 10.0.0.2:5555 > h3_subscriber.log 2>&1 &
+
+h2 ps aux | grep Discovery
+h4 ps aux | grep Broker
+h5 ps aux | grep Publisher
+h3 ps aux | grep Subscriber
+
+h2 cat h2_discovery.log | grep -E "leader|replica|ERROR" | tail -n 5
+h3 cat h3_discovery.log | grep -E "leader|replica|ERROR" | tail -n 5
+h4 cat h4_discovery.log | grep -E "leader|replica|ERROR" | tail -n 5
+h4 cat h4_broker.log | grep -E "configure|leader|ERROR" | tail -n 5
+h5 cat h5_publisher.log | grep -E "Publishing|ERROR" | tail -n 5
+h3 cat h3_subscriber.log | grep -E "Received|ERROR" | tail -n 5
