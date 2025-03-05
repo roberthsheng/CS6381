@@ -450,3 +450,6 @@ class BrokerMW:
         except Exception as e:
             self.logger.error("Error during cleanup: " + str(e))
             raise e
+        
+def disable_event_loop(self):
+    self.handle_events = False
