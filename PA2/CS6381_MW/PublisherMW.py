@@ -40,10 +40,13 @@ class PublisherMW:
 
             # Initialize our variables
             self.port = args.port
-            self.addr = socket.gethostbyname(socket.gethostname())
+            self.addr = args.addr  # Use command-line IP (e.g., 10.0.0.2) instead of hostname resolution
             self.name = args.name
 
-            # Set up ZooKeeper to watch for the discovery/broker’s znode.
+            # Log the key configuration details
+            self.logger.info(f"PublisherMW::configure - Using addr: {self.addr}, zk_addr: {args.zk_addr}, discovery: {args.discovery}")
+
+            # Set up ZooKeeper to watch for the discovery/broker’s znode
             self.logger.info("PublisherMW::configure - connecting to ZooKeeper")
             self.zk = KazooClient(hosts=args.zk_addr)
             self.zk.start()
@@ -63,20 +66,21 @@ class PublisherMW:
 
             # Connect to the discovery service
             self.logger.debug("PublisherMW::configure - connecting to Discovery service")
-            leader_znode_path = self.wait_for_leader() # block until there's a discovery service
-            self.connect_to_leader(leader_znode_path) # connect to it
+            leader_znode_path = self.wait_for_leader()  # Block until there's a discovery service
+            self.connect_to_leader(leader_znode_path)  # Connect to it
 
             # Bind the PUB socket for dissemination
             self.logger.debug("PublisherMW::configure - binding to PUB socket")
-            bind_string = f"tcp://*:{self.port}"
+            bind_string = f"tcp://{self.addr}:{self.port}"
             self.pub.bind(bind_string)
 
             # Watch discovery if it dies
             self.logger.info("PublisherMW::configure - watching for discovery changes")
-            self.watch_leader() 
+            self.watch_leader()
             self.logger.info("PublisherMW::configure completed")
 
         except Exception as e:
+            self.logger.error(f"PublisherMW::configure - Exception: {str(e)}")
             raise e
 
     def wait_for_leader(self, check_interval=1):
