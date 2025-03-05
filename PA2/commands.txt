@@ -28,3 +28,6 @@ h4 cat h4_discovery.log | grep -E "leader|replica|ERROR" | tail -n 5
 h4 cat h4_broker.log | grep -E "configure|leader|ERROR" | tail -n 5
 h5 cat h5_publisher.log | grep -E "Publishing|ERROR" | tail -n 5
 h3 cat h3_subscriber.log | grep -E "Received|ERROR" | tail -n 5
+
+
+protoc --python_out=CS6381_MW discovery.proto topic.proto

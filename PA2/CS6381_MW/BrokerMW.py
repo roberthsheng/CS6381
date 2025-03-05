@@ -40,30 +40,22 @@ class BrokerMW:
     def configure(self, args):
         try:
             self.logger.info("BrokerMW::configure")
-            # Set broker's bind address and publish port from command-line args.
             self.addr = args.addr
             self.port = args.port
-            self.discovery_election_path = "/discovery_election"
-            self.broker_election_path = "/broker_election"
-
-            # Setup ZooKeeper connection using provided zk_addr.
             self.zk_addr = args.zk_addr
             self._init_zk()
-
-            # Setup ZMQ sockets.
             self.req = self.context.socket(zmq.REQ)
-            leader_znode_path = self.wait_for_leader() # wait for discovery leader
+            leader_znode_path = self.wait_for_leader()
             self.connect_to_leader(leader_znode_path)
 
-            # Create a SUB socket to receive publications from publishers.
             self.sub = self.context.socket(zmq.SUB)
-            self.sub.setsockopt_string(zmq.SUBSCRIBE, "")  # Subscribe to all topics
+            self.sub.setsockopt_string(zmq.SUBSCRIBE, "")
+            self.sub.connect("tcp://10.0.0.5:5570")  # Connect to Publisher
+            self.logger.info("BrokerMW::configure - SUB connected to tcp://10.0.0.5:5570")
 
-            # Create a PUB socket to disseminate messages to subscribers.
             self.pub = self.context.socket(zmq.PUB)
             self.pub.bind(f"tcp://{self.addr}:{self.port}")
 
-            # Setup poller for the REQ and SUB sockets.
             self.poller = zmq.Poller()
             self.poller.register(self.req, zmq.POLLIN)
             self.poller.register(self.sub, zmq.POLLIN)
