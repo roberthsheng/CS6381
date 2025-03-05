@@ -40,14 +40,14 @@ class PublisherMW:
 
             # Initialize our variables
             self.port = args.port
-            self.addr = args.addr  # Use command-line IP (e.g., 10.0.0.2) instead of hostname resolution
+            self.addr = args.addr  # Fixed from socket.gethostbyname
             self.name = args.name
 
-            # Log the key configuration details
+            # Log key configuration details
             self.logger.info(f"PublisherMW::configure - Using addr: {self.addr}, zk_addr: {args.zk_addr}, discovery: {args.discovery}")
 
-            # Set up ZooKeeper to watch for the discovery/broker’s znode
-            self.logger.info("PublisherMW::configure - connecting to ZooKeeper")
+            # Set up ZooKeeper
+            self.logger.info("PublisherMW::configure - Connecting to ZooKeeper at %s", args.zk_addr)
             self.zk = KazooClient(hosts=args.zk_addr)
             self.zk.start()
             self.zk_event_queue = queue.Queue()
@@ -65,19 +65,19 @@ class PublisherMW:
             self.poller.register(self.req, zmq.POLLIN)
 
             # Connect to the discovery service
-            self.logger.debug("PublisherMW::configure - connecting to Discovery service")
+            self.logger.info("PublisherMW::configure - Connecting to Discovery service at %s", args.discovery)
             leader_znode_path = self.wait_for_leader()  # Block until there's a discovery service
             self.connect_to_leader(leader_znode_path)  # Connect to it
 
             # Bind the PUB socket for dissemination
-            self.logger.debug("PublisherMW::configure - binding to PUB socket")
+            self.logger.info("PublisherMW::configure - Binding PUB socket to tcp://%s:%s", self.addr, self.port)
             bind_string = f"tcp://{self.addr}:{self.port}"
             self.pub.bind(bind_string)
 
             # Watch discovery if it dies
-            self.logger.info("PublisherMW::configure - watching for discovery changes")
+            self.logger.info("PublisherMW::configure - Watching for discovery changes")
             self.watch_leader()
-            self.logger.info("PublisherMW::configure completed")
+            self.logger.info("PublisherMW::configure - Completed")
 
         except Exception as e:
             self.logger.error(f"PublisherMW::configure - Exception: {str(e)}")
