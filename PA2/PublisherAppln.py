@@ -85,9 +85,8 @@ class PublisherAppln:
         try:
             self.logger.info("PublisherAppln::invoke_operation")
             if self.state == self.State.REGISTER:
-                self.logger.info("PublisherAppln::invoke_operation - registering with the discovery service")
+                self.logger.info("PublisherAppln::invoke_operation - Registering with Discovery")
                 self.mw_obj.register(self.name, self.topiclist)
-                # After registration, transition to waiting for broker
                 self.state = self.State.REGISTER_WAIT
                 return None
 
@@ -101,7 +100,7 @@ class PublisherAppln:
                 return None
 
             elif self.state == self.State.DISSEMINATE:
-                self.logger.info("PublisherAppln::invoke_operation - starting dissemination")
+                self.logger.info("PublisherAppln::invoke_operation - Starting dissemination")
                 ts = TopicSelector()
                 # Instead of a blocking loop, send one round of messages and then return control.
                 for topic in self.topiclist:
@@ -124,7 +123,7 @@ class PublisherAppln:
 
     def register_response(self, reg_resp):
         try:
-            self.logger.info("PublisherAppln::register_response")
+            self.logger.info("PublisherAppln::register_response - Received response: status=%s", reg_resp.status)
             if reg_resp.status == discovery_pb2.STATUS_SUCCESS:
                 self.logger.debug("PublisherAppln::register_response - registration successful")
                 # After registration, wait for the broker
