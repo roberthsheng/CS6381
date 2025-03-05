@@ -68,20 +68,20 @@ class BrokerMW:
             raise e
 
     def _init_zk(self):
-        """Initialize ZooKeeper connection and participate in leader election."""
         try:
             self.logger.info("DiscoveryMW::_init_zk - Connecting to ZooKeeper at {}".format(self.zk_addr))
             self.zk = KazooClient(hosts=self.zk_addr)
-            self.zk.start(timeout=10) # Increased timeout for robustness
-
-            # Ensure election path exists
+            self.zk.start(timeout=10)
             if not self.zk.exists(self.broker_election_path):
                 try:
-                    self.zk.create(self.broker_election_path, makepath=True)
+                    self.zk.create(self.broker_election_path, value=b"", makepath=True)
                     self.logger.info(f"Created election path: {self.broker_election_path}")
                 except NodeExistsError:
-                    self.logger.warning(f"Election path {self.broker_election_path} already exists, likely created concurrently.")
-
+                    self.logger.warning(f"Election path {self.broker_election_path} already exists")
+            self._attempt_leader_election()
+        except Exception as e:
+            self.logger.error(f"DiscoveryMW::_init_zk - ZooKeeper initialization failed: {e}")
+            raise e
 
             self._attempt_leader_election()
 
