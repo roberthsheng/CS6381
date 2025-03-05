@@ -65,30 +65,30 @@ class SubscriberMW:
         try:
             self.logger.info("SubscriberMW::configure")
             self.name = args.name
+            self.addr = args.addr  # Add this to use Mininet IP (e.g., 10.0.0.3)
             self.publishers = set()
             self.election_path = "/discovery_election"
 
-            # set up influxdb client
-            self.logger.info("SubscriberMW - Connecting to influxdb")
-            token =  "5EapoOGtPyx4TEPCDEMPiPN5n5KroFNwHfHneEfZC5HKDSwrJA1zgrThvmPJXEGJ_LXqOUMq0e0hrsANTuBxRQ=="
+            # Set up InfluxDB client
+            self.logger.info("SubscriberMW - Connecting to InfluxDB")
+            token = "5EapoOGtPyx4TEPCDEMPiPN5n5KroFNwHfHneEfZC5HKDSwrJA1zgrThvmPJXEGJ_LXqOUMq0e0hrsANTuBxRQ=="
             org = "CS6381"
             host = "https://us-east-1-1.aws.cloud2.influxdata.com"
-
             self.influx_client = InfluxDBClient3(host=host, token=token, org=org)
             self.database = "CS6381"
             self.write_queue = queue.Queue()
 
-            # connect to zk
+            # Connect to ZooKeeper
             self.zk = KazooClient(hosts=args.zk_addr)
             self.zk.start()
 
-            # Set up the queue for ZooKeeper events
+            # Set up queue for ZooKeeper events
             self.zk_event_queue = queue.Queue()
 
             # Read dissemination strategy from config
             config = configparser.ConfigParser()
             config.read("config.ini")
-            dissemination = config["Dissemination"]["Strategy"] 
+            dissemination = config["Dissemination"]["Strategy"]
             self.dissemination = dissemination
 
             self.write_interval = args.time
@@ -96,9 +96,9 @@ class SubscriberMW:
             # Get ZMQ context
             context = zmq.Context()
 
-            # Create REQ socket for discovery service
+            # Create REQ socket for Discovery service
             self.req = context.socket(zmq.REQ)
-            leader_znode_path = self.wait_for_leader() # wait for leader
+            leader_znode_path = self.wait_for_leader()  # Wait for leader
             self.connect_to_leader(leader_znode_path)
 
             # Create SUB socket for receiving publications

@@ -205,12 +205,14 @@ class SubscriberAppln:
 
 def parseCmdLineArgs():
     parser = argparse.ArgumentParser(description="Subscriber Application")
-
     parser.add_argument("-n", "--name", default="sub", help="Name of the subscriber")
-    parser.add_argument("-z", "--zk_addr", default="localhost:2181", help="Zookeeper instance addr")
+    parser.add_argument("-a", "--addr", default="localhost", help="IP address to advertise")  # Add this
+    parser.add_argument("-z", "--zk_addr", default="localhost:2181", help="ZooKeeper address")
     parser.add_argument("-T", "--num_topics", type=int, default=1, help="Number of topics to subscribe")
     parser.add_argument("-t", "--time", type=int, default=15, help="Amount of time to run for")
-    parser.add_argument("-l", "--loglevel", type=int, default=logging.INFO, choices=[logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL], help="logging level, choices 10,20,30,40,50")
+    parser.add_argument("-l", "--loglevel", type=int, default=logging.INFO,
+                        choices=[logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL],
+                        help="Logging level, choices 10,20,30,40,50")
     return parser.parse_args()
 
 ###################################
