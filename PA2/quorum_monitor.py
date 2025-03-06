@@ -298,7 +298,12 @@ class QuorumMonitor:
             
             # Keep running until signaled to stop
             while self.running:
-                time.sleep(1)
+                try:
+                    time.sleep(1)
+                except KeyboardInterrupt:
+                    self.logger.info("KeyboardInterrupt received, exiting")
+                    self.running = False
+                    break
                 
         except KeyboardInterrupt:
             self.logger.info("Monitor service stopped by user")
@@ -306,18 +311,35 @@ class QuorumMonitor:
             self.logger.error(f"Unexpected error in monitor service: {str(e)}")
         finally:
             self.cleanup()
+            # Ensure we exit
+            self.logger.info("Exiting program")
+            sys.exit(0)
     
     def cleanup(self):
         """Clean up resources"""
-        if self.zk and self.zk.connected:
-            self.zk.stop()
-            self.zk.close()
-            self.logger.info("ZooKeeper connection closed")
+        try:
+            # Stop any running threads
+            for thread in threading.enumerate():
+                if thread is not threading.main_thread():
+                    self.logger.info(f"Terminating thread: {thread.name}")
+            
+            # Close ZooKeeper connection
+            if self.zk and self.zk.connected:
+                self.zk.stop()
+                self.zk.close()
+                self.logger.info("ZooKeeper connection closed")
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {str(e)}")
+            # Force exit if cleanup fails
+            os._exit(1)
     
     def signal_handler(self, sig, frame):
         """Handle termination signals"""
         self.logger.info(f"Received signal {sig}, shutting down")
         self.running = False
+        self.cleanup()
+        # Force exit after a brief delay
+        threading.Timer(3.0, lambda: os._exit(0)).start()
 
 def parse_args():
     """Parse command line arguments"""
