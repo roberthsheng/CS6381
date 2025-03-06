@@ -64,30 +64,43 @@ class QuorumMonitor:
         self.hostname = socket.gethostname()
         self.logger.info(f"Monitor starting on host: {self.hostname}")
         
+        # Check if SSH key exists
+        ssh_key_path = os.path.expanduser("~/.ssh/S25_CS6381.pem")
+        if not os.path.exists(ssh_key_path):
+            self.logger.warning(f"SSH key not found at {ssh_key_path}. Remote recovery will fail!")
+            self.logger.warning("Please copy your SSH key to this location with proper permissions (chmod 600).")
+        else:
+            self.logger.info(f"Found SSH key at {ssh_key_path}")
+            # Check permissions - SSH requires proper permissions
+            key_permissions = oct(os.stat(ssh_key_path).st_mode & 0o777)
+            if key_permissions != '0o600':
+                self.logger.warning(f"SSH key has incorrect permissions: {key_permissions}. Should be 0o600.")
+                self.logger.warning(f"Run: chmod 600 {ssh_key_path}")
+        
         # Register signal handler
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         
-        # VM configuration for recovery
+        # VM configuration for recovery - removed python3 from command since we'll activate venv
         self.vm_config = {
             "discovery": {
                 "vm2": {
                     "ip": "192.168.5.139", 
-                    "command": "python3 ~/CS6381/PA2/DiscoveryAppln.py --addr 192.168.5.139 --port 5555 --zk_addr 192.168.5.17:2181 --loglevel 20"
+                    "command": "python DiscoveryAppln.py --addr 192.168.5.139 --port 5555 --zk_addr 192.168.5.17:2181 --loglevel 20"
                 },
                 "vm3": {
                     "ip": "192.168.5.175", 
-                    "command": "python3 ~/CS6381/PA2/DiscoveryAppln.py --addr 192.168.5.175 --port 5555 --zk_addr 192.168.5.17:2181 --loglevel 20"
+                    "command": "python DiscoveryAppln.py --addr 192.168.5.175 --port 5555 --zk_addr 192.168.5.17:2181 --loglevel 20"
                 }
             },
             "broker": {
                 "vm4": {
                     "ip": "192.168.5.126", 
-                    "command": "python3 ~/CS6381/PA2/BrokerAppln.py --name broker-distsys-team3-vm4 --addr 192.168.5.126 --port 5566 --zk_addr 192.168.5.17:2181 --discovery 192.168.5.139:5555 --loglevel 20"
+                    "command": "python BrokerAppln.py --name broker-distsys-team3-vm4 --addr 192.168.5.126 --port 5566 --zk_addr 192.168.5.17:2181 --discovery 192.168.5.139:5555 --loglevel 20"
                 },
                 "vm5": {
                     "ip": "192.168.5.178", 
-                    "command": "python3 ~/CS6381/PA2/BrokerAppln.py --name broker-distsys-team3-vm5 --addr 192.168.5.178 --port 5566 --zk_addr 192.168.5.17:2181 --discovery 192.168.5.139:5555 --loglevel 20"
+                    "command": "python BrokerAppln.py --name broker-distsys-team3-vm5 --addr 192.168.5.178 --port 5566 --zk_addr 192.168.5.17:2181 --discovery 192.168.5.139:5555 --loglevel 20"
                 }
             }
         }
@@ -503,29 +516,48 @@ class QuorumMonitor:
                     self.logger.info("Broker recovery process completed")
     
     def _execute_remote_command(self, ip, command):
-        """Execute a command on a remote VM using SSH"""
+        """Execute a command on a remote VM using SSH with key authentication"""
         # Don't execute commands if shutting down
         if self.shutting_down:
             self.logger.info(f"Skipping remote command execution during shutdown")
             return
             
         try:
-            # Add SSH options to avoid host key checking
-            background_command = f"nohup {command} > recovery.log 2>&1 &"
+            # Create a proper remote execution sequence:
+            # 1. SSH with private key authentication
+            # 2. Start a login shell (-l) to ensure profile is loaded
+            # 3. Source the virtual environment
+            # 4. Execute the command in the background with proper logging
             
-            # Use SSH with options to avoid the host key verification prompt
-            ssh_command = f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {ip} '{background_command}'"
+            # Format proper background execution with output redirection
+            background_command = (
+                f"cd ~/CS6381/PA2 && "  # Change to proper directory
+                f"source ~/venv/bin/activate && "  # Activate virtual environment
+                f"nohup {command} > recovery.log 2>&1 &"  # Run command with output redirection
+            )
+            
+            # Use SSH with key authentication and other necessary options
+            ssh_command = (
+                f"ssh -i ~/.ssh/S25_CS6381.pem -o StrictHostKeyChecking=no "
+                f"-o UserKnownHostsFile=/dev/null cc@{ip} '{background_command}'"
+            )
+            
             self.logger.info(f"Executing recovery command on {ip}: {ssh_command}")
             
-            # Execute the command
+            # Execute the command with timeout
             process = subprocess.Popen(ssh_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = process.communicate(timeout=10)
+            stdout, stderr = process.communicate(timeout=15)  # Increased timeout for environment setup
             
             if process.returncode != 0:
                 self.logger.error(f"Command failed with return code {process.returncode}")
-                self.logger.error(f"Stderr: {stderr.decode('utf-8')}")
+                if stderr:
+                    self.logger.error(f"Stderr: {stderr.decode('utf-8')}")
+                if stdout:
+                    self.logger.info(f"Stdout: {stdout.decode('utf-8')}")
             else:
                 self.logger.info(f"Command executed successfully on {ip}")
+                if stdout:
+                    self.logger.info(f"Command output: {stdout.decode('utf-8').strip()}")
                 
         except subprocess.TimeoutExpired:
             self.logger.warning("SSH command timed out, but may still be running on remote host")
