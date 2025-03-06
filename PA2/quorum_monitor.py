@@ -14,6 +14,7 @@ import subprocess
 import threading
 import signal
 import socket
+import traceback
 from kazoo.client import KazooClient, KazooState
 from kazoo.exceptions import KazooException, NoNodeError
 
@@ -75,7 +76,7 @@ class QuorumMonitor:
             else:
                 self.logger.info("ZooKeeper connected")
                 # Re-establish watches when reconnected
-                self.setup_watches()
+                threading.Thread(target=self.setup_watches, name="SetupWatchesThread").start()
         
         self.zk.start()
         self.logger.info(f"ZooKeeper connected with session ID: {self.zk._session_id}")
@@ -97,77 +98,95 @@ class QuorumMonitor:
             except Exception as e:
                 self.logger.error(f"Error ensuring path {path} exists: {str(e)}")
     
-    def _print_zk_structure(self):
-        """Print the ZooKeeper structure for debugging"""
-        self.logger.info("===== ZooKeeper Structure =====")
-        self._print_zk_path("/")
-        self.logger.info("==============================")
-    
-    def _print_zk_path(self, path):
-        """Recursively print ZooKeeper path structure"""
+    def _list_zk_root(self):
+        """Non-recursive simple listing of ZooKeeper root paths for debugging"""
+        self.logger.info("==== ZooKeeper Root Paths ====")
         try:
-            children = self.zk.get_children(path)
-            self.logger.info(f"Path: {path}, Children: {children}")
-            for child in children:
-                child_path = path + "/" + child if path != "/" else "/" + child
-                self._print_zk_path(child_path)
+            root_children = self.zk.get_children('/')
+            self.logger.info(f"Root paths: {root_children}")
+            
+            # Check broker path specifically
+            if 'brokers' in root_children:
+                broker_children = self.zk.get_children('/brokers')
+                self.logger.info(f"Broker children: {broker_children}")
+            
+            # Check discovery path specifically
+            if 'discovery' in root_children:
+                discovery_children = self.zk.get_children('/discovery')
+                self.logger.info(f"Discovery children: {discovery_children}")
+                
         except Exception as e:
-            self.logger.error(f"Error printing path {path}: {str(e)}")
+            self.logger.error(f"Error listing ZK root: {str(e)}", exc_info=True)
+        self.logger.info("==============================")
     
     def setup_watches(self):
         """Setup watches on discovery and broker nodes"""
         self.logger.info("Setting up watches on discovery and broker nodes")
         
-        # Print current ZooKeeper structure
-        self._print_zk_structure()
-        
-        # Check broker path exists before setting up watch
-        if not self.zk.exists(self.broker_path):
-            self.logger.warning(f"Broker path {self.broker_path} does not exist! Creating it now.")
-            self.zk.create(self.broker_path, makepath=True)
-        
-        # Set up ChildrenWatch for brokers with explicit handler
-        def broker_watch_handler(children, event=None):
-            self.logger.info(f"BROKER WATCH TRIGGERED - Children: {children}")
-            if event:
-                self.logger.info(f"Event triggered watch: {event}")
-            self._check_broker_quorum()
-            return True
-        
-        self.broker_watch = self.zk.ChildrenWatch(self.broker_path, broker_watch_handler)
-        self.logger.info(f"Broker watch established on {self.broker_path}")
-        
-        # Check discovery path exists before setting up watch
-        if not self.zk.exists(self.discovery_path):
-            self.logger.warning(f"Discovery path {self.discovery_path} does not exist! Creating it now.")
-            self.zk.create(self.discovery_path, makepath=True)
+        try:
+            # Simply list root paths instead of recursive traversal
+            self._list_zk_root()
             
-        # Set up ChildrenWatch for discovery with explicit handler
-        def discovery_watch_handler(children, event=None):
-            self.logger.info(f"DISCOVERY WATCH TRIGGERED - Children: {children}")
-            if event:
-                self.logger.info(f"Event triggered watch: {event}")
+            # Check broker path exists before setting up watch
+            if not self.zk.exists(self.broker_path):
+                self.logger.warning(f"Broker path {self.broker_path} does not exist! Creating it now.")
+                self.zk.create(self.broker_path, makepath=True)
+                self.logger.info(f"Created broker path: {self.broker_path}")
+            else:
+                children = self.zk.get_children(self.broker_path)
+                self.logger.info(f"Found broker path with children: {children}")
+            
+            # Direct watch on broker path with explicit callback
+            self.logger.info(f"Setting watch on broker path: {self.broker_path}")
+            
+            def broker_watch_callback(children):
+                try:
+                    self.logger.info(f"*** BROKER WATCH TRIGGERED *** Current nodes: {children}")
+                    self._check_broker_quorum()
+                    return True
+                except Exception as e:
+                    self.logger.error(f"Error in broker watch callback: {str(e)}", exc_info=True)
+                    return True
+                    
+            self.broker_watch = self.zk.ChildrenWatch(self.broker_path, broker_watch_callback)
+            self.logger.info("Successfully set up broker watch")
+            
+            # Check discovery path exists before setting up watch
+            if not self.zk.exists(self.discovery_path):
+                self.logger.warning(f"Discovery path {self.discovery_path} does not exist! Creating it now.")
+                self.zk.create(self.discovery_path, makepath=True)
+                self.logger.info(f"Created discovery path: {self.discovery_path}")
+            else:
+                children = self.zk.get_children(self.discovery_path)
+                self.logger.info(f"Found discovery path with children: {children}")
+            
+            # Direct watch on discovery path with explicit callback
+            self.logger.info(f"Setting watch on discovery path: {self.discovery_path}")
+            
+            def discovery_watch_callback(children):
+                try:
+                    self.logger.info(f"*** DISCOVERY WATCH TRIGGERED *** Current nodes: {children}")
+                    self._check_discovery_quorum()
+                    return True
+                except Exception as e:
+                    self.logger.error(f"Error in discovery watch callback: {str(e)}", exc_info=True)
+                    return True
+                    
+            self.discovery_watch = self.zk.ChildrenWatch(self.discovery_path, discovery_watch_callback)
+            self.logger.info("Successfully set up discovery watch")
+            
+            # Test the watch functionality
+            self.logger.info("Testing watch notification...")
+            # Force a manual check immediately
+            self._check_broker_quorum()
             self._check_discovery_quorum()
-            return True
+            
+            self.logger.info("Watch setup complete")
         
-        self.discovery_watch = self.zk.ChildrenWatch(self.discovery_path, discovery_watch_handler)
-        self.logger.info(f"Discovery watch established on {self.discovery_path}")
-        
-        # Initial check for both quorums
-        self._check_discovery_quorum()
-        self._check_broker_quorum()
-    
-    def _handle_discovery_change(self, children):
-        """Handle changes in discovery nodes"""
-        self.logger.info(f"Discovery nodes changed: {children}")
-        self._check_discovery_quorum()
-        return True  # Keep the watch active
-    
-    def _handle_broker_change(self, children):
-        """Handle changes in broker nodes"""
-        self.logger.info(f"Broker nodes changed: {children}")
-        self._check_broker_quorum()
-        return True  # Keep the watch active
+        except Exception as e:
+            self.logger.error(f"Error setting up watches: {str(e)}", exc_info=True)
+            tb = traceback.format_exc()
+            self.logger.error(f"Traceback: {tb}")
     
     def _check_discovery_quorum(self):
         """Check if discovery quorum is maintained and initiate recovery if needed"""
@@ -191,18 +210,20 @@ class QuorumMonitor:
             else:
                 self.logger.info(f"Discovery quorum OK: {len(children)} nodes active")
         except Exception as e:
-            self.logger.error(f"Error checking discovery quorum: {str(e)}")
+            self.logger.error(f"Error checking discovery quorum: {str(e)}", exc_info=True)
     
     def _check_broker_quorum(self):
         """Check if broker quorum is maintained and initiate recovery if needed"""
         try:
+            self.logger.info(f"Checking broker quorum on path: {self.broker_path}")
             children = self.zk.get_children(self.broker_path)
-            self.logger.info(f"Checking broker quorum: Current nodes ({len(children)}): {children}")
+            self.logger.info(f"Current broker nodes ({len(children)}): {children}")
             
             if len(children) < 2:
+                self.logger.warning(f"Broker quorum lost! Only {len(children)} nodes active: {children}")
                 with self.broker_recovery_lock:
                     if not self.broker_recovery_in_progress:
-                        self.logger.warning(f"Broker quorum lost! Only {len(children)} nodes active: {children}")
+                        self.logger.warning(f"Initiating broker recovery process")
                         self.broker_recovery_in_progress = True
                         recovery_thread = threading.Thread(
                             target=self._recover_broker_node, 
@@ -218,8 +239,11 @@ class QuorumMonitor:
             self.logger.error(f"Broker path {self.broker_path} does not exist!")
             # Create the path and return since there are no brokers to recover yet
             self.zk.create(self.broker_path, makepath=True)
+            self.logger.info(f"Created missing broker path {self.broker_path}")
         except Exception as e:
             self.logger.error(f"Error checking broker quorum: {str(e)}", exc_info=True)
+            tb = traceback.format_exc()
+            self.logger.error(f"Traceback: {tb}")
     
     def _recover_discovery_node(self, active_nodes):
         """Recover a discovery node by identifying which one is missing and restarting it"""
@@ -405,8 +429,8 @@ class QuorumMonitor:
                     time.sleep(5)
                     check_counter += 1
                     
-                    # Every 60 seconds, do a manual check of quorums
-                    if check_counter >= 12:
+                    # Every 30 seconds, do a manual check of quorums
+                    if check_counter >= 6:
                         self.logger.info("Performing periodic quorum check")
                         self._check_discovery_quorum()
                         self._check_broker_quorum()
@@ -421,6 +445,9 @@ class QuorumMonitor:
             self.logger.info("Monitor service stopped by user via KeyboardInterrupt")
         except Exception as e:
             self.logger.error(f"Unexpected error in monitor service: {str(e)}", exc_info=True)
+            # Log the full traceback for unhandled exceptions
+            tb = traceback.format_exc()
+            self.logger.error(f"Traceback: {tb}")
         finally:
             self.logger.info("Cleaning up before exit")
             self.cleanup()
