@@ -240,7 +240,6 @@ class QuorumMonitor:
     
     def _check_broker_quorum(self):
         """Check if broker quorum is maintained and initiate recovery if needed"""
-        # Don't check if shutting down
         if self.shutting_down:
             self.logger.info("Skipping broker quorum check during shutdown")
             return
@@ -251,7 +250,27 @@ class QuorumMonitor:
             self.logger.info(f"Current broker nodes ({len(children)}): {children}")
             
             if len(children) < 2:
-                self.logger.warning(f"Broker quorum lost! Only {len(children)} nodes active: {children}")
+                self.logger.warning(f"Potential broker quorum loss detected! Only {len(children)} nodes active: {children}")
+                
+                # Perform multiple verification checks with delay to confirm it's not a temporary glitch
+                verification_count = 3
+                for i in range(verification_count):
+                    time.sleep(2)  # Wait 2 seconds between checks
+                    
+                    # Skip if shutting down
+                    if self.shutting_down:
+                        return
+                        
+                    verify_children = self.zk.get_children(self.broker_path)
+                    self.logger.info(f"Verification check {i+1}/{verification_count}: {len(verify_children)} broker nodes")
+                    
+                    if len(verify_children) >= 2:
+                        self.logger.info(f"Broker quorum restored during verification. No recovery needed.")
+                        return
+                
+                # Still below quorum after all verification checks
+                self.logger.warning(f"Confirmed broker quorum loss after {verification_count} verification checks")
+                
                 with self.broker_recovery_lock:
                     if not self.broker_recovery_in_progress and not self.shutting_down:
                         self.logger.warning(f"Initiating broker recovery process")
@@ -268,15 +287,8 @@ class QuorumMonitor:
                         self.logger.info("Skipping broker recovery: already in progress or shutting down")
             else:
                 self.logger.info(f"Broker quorum OK: {len(children)} nodes active")
-        except NoNodeError:
-            self.logger.error(f"Broker path {self.broker_path} does not exist!")
-            # Create the path and return since there are no brokers to recover yet
-            self.zk.create(self.broker_path, makepath=True)
-            self.logger.info(f"Created missing broker path {self.broker_path}")
         except Exception as e:
             self.logger.error(f"Error checking broker quorum: {str(e)}", exc_info=True)
-            tb = traceback.format_exc()
-            self.logger.error(f"Traceback: {tb}")
     
     def _recover_discovery_node(self, active_nodes):
         """Recover a discovery node by identifying which one is missing and restarting it"""
