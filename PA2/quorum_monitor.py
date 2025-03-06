@@ -34,6 +34,7 @@ class QuorumMonitor:
         self.discovery_recovery_in_progress = False
         self.broker_recovery_in_progress = False
         self.running = True
+        self.shutting_down = False  # Flag to indicate shutdown in progress
         self.hostname = socket.gethostname()
         self.logger.info(f"Monitor starting on host: {self.hostname}")
         
@@ -76,7 +77,8 @@ class QuorumMonitor:
             else:
                 self.logger.info("ZooKeeper connected")
                 # Re-establish watches when reconnected
-                threading.Thread(target=self.setup_watches, name="SetupWatchesThread").start()
+                if not self.shutting_down:  # Don't set up watches during shutdown
+                    threading.Thread(target=self.setup_watches, name="SetupWatchesThread").start()
         
         self.zk.start()
         self.logger.info(f"ZooKeeper connected with session ID: {self.zk._session_id}")
@@ -121,6 +123,10 @@ class QuorumMonitor:
     
     def setup_watches(self):
         """Setup watches on discovery and broker nodes"""
+        if self.shutting_down:
+            self.logger.info("Skipping watch setup during shutdown")
+            return
+            
         self.logger.info("Setting up watches on discovery and broker nodes")
         
         try:
@@ -141,8 +147,14 @@ class QuorumMonitor:
             
             def broker_watch_callback(children):
                 try:
+                    if self.shutting_down:
+                        self.logger.info("Ignoring broker watch during shutdown")
+                        return False  # Don't renew watch during shutdown
+                        
                     self.logger.info(f"*** BROKER WATCH TRIGGERED *** Current nodes: {children}")
-                    self._check_broker_quorum()
+                    # Only check quorum if not already in recovery and not shutting down
+                    if not self.broker_recovery_in_progress and not self.shutting_down:
+                        self._check_broker_quorum()
                     return True
                 except Exception as e:
                     self.logger.error(f"Error in broker watch callback: {str(e)}", exc_info=True)
@@ -165,8 +177,14 @@ class QuorumMonitor:
             
             def discovery_watch_callback(children):
                 try:
+                    if self.shutting_down:
+                        self.logger.info("Ignoring discovery watch during shutdown")
+                        return False  # Don't renew watch during shutdown
+                        
                     self.logger.info(f"*** DISCOVERY WATCH TRIGGERED *** Current nodes: {children}")
-                    self._check_discovery_quorum()
+                    # Only check quorum if not already in recovery and not shutting down
+                    if not self.discovery_recovery_in_progress and not self.shutting_down:
+                        self._check_discovery_quorum()
                     return True
                 except Exception as e:
                     self.logger.error(f"Error in discovery watch callback: {str(e)}", exc_info=True)
@@ -175,11 +193,11 @@ class QuorumMonitor:
             self.discovery_watch = self.zk.ChildrenWatch(self.discovery_path, discovery_watch_callback)
             self.logger.info("Successfully set up discovery watch")
             
-            # Test the watch functionality
-            self.logger.info("Testing watch notification...")
-            # Force a manual check immediately
-            self._check_broker_quorum()
-            self._check_discovery_quorum()
+            # Test the watch functionality by doing a manual check
+            self.logger.info("Testing watch functionality...")
+            if not self.shutting_down:
+                self._check_broker_quorum()
+                self._check_discovery_quorum()
             
             self.logger.info("Watch setup complete")
         
@@ -190,14 +208,20 @@ class QuorumMonitor:
     
     def _check_discovery_quorum(self):
         """Check if discovery quorum is maintained and initiate recovery if needed"""
+        # Don't check if shutting down
+        if self.shutting_down:
+            self.logger.info("Skipping discovery quorum check during shutdown")
+            return
+            
         try:
             children = self.zk.get_children(self.discovery_path)
             self.logger.info(f"Checking discovery quorum: Current nodes ({len(children)}): {children}")
             
             if len(children) < 2:
+                self.logger.warning(f"Discovery quorum lost! Only {len(children)} nodes active")
                 with self.discovery_recovery_lock:
-                    if not self.discovery_recovery_in_progress:
-                        self.logger.warning("Discovery quorum lost! Starting recovery...")
+                    if not self.discovery_recovery_in_progress and not self.shutting_down:
+                        self.logger.warning("Starting discovery recovery process")
                         self.discovery_recovery_in_progress = True
                         recovery_thread = threading.Thread(
                             target=self._recover_discovery_node, 
@@ -207,6 +231,8 @@ class QuorumMonitor:
                         recovery_thread.daemon = True
                         recovery_thread.start()
                         self.logger.info(f"Started discovery recovery thread: {recovery_thread.name}")
+                    else:
+                        self.logger.info("Skipping discovery recovery: already in progress or shutting down")
             else:
                 self.logger.info(f"Discovery quorum OK: {len(children)} nodes active")
         except Exception as e:
@@ -214,6 +240,11 @@ class QuorumMonitor:
     
     def _check_broker_quorum(self):
         """Check if broker quorum is maintained and initiate recovery if needed"""
+        # Don't check if shutting down
+        if self.shutting_down:
+            self.logger.info("Skipping broker quorum check during shutdown")
+            return
+            
         try:
             self.logger.info(f"Checking broker quorum on path: {self.broker_path}")
             children = self.zk.get_children(self.broker_path)
@@ -222,7 +253,7 @@ class QuorumMonitor:
             if len(children) < 2:
                 self.logger.warning(f"Broker quorum lost! Only {len(children)} nodes active: {children}")
                 with self.broker_recovery_lock:
-                    if not self.broker_recovery_in_progress:
+                    if not self.broker_recovery_in_progress and not self.shutting_down:
                         self.logger.warning(f"Initiating broker recovery process")
                         self.broker_recovery_in_progress = True
                         recovery_thread = threading.Thread(
@@ -233,6 +264,8 @@ class QuorumMonitor:
                         recovery_thread.daemon = True
                         recovery_thread.start()
                         self.logger.info(f"Started broker recovery thread: {recovery_thread.name}")
+                    else:
+                        self.logger.info("Skipping broker recovery: already in progress or shutting down")
             else:
                 self.logger.info(f"Broker quorum OK: {len(children)} nodes active")
         except NoNodeError:
@@ -247,8 +280,23 @@ class QuorumMonitor:
     
     def _recover_discovery_node(self, active_nodes):
         """Recover a discovery node by identifying which one is missing and restarting it"""
+        # Don't proceed with recovery if shutting down
+        if self.shutting_down:
+            self.logger.info("Skipping discovery recovery during shutdown")
+            with self.discovery_recovery_lock:
+                self.discovery_recovery_in_progress = False
+            return
+            
         try:
             self.logger.info(f"Starting discovery node recovery. Active nodes: {active_nodes}")
+            
+            # Double-check quorum before proceeding
+            current_nodes = self.zk.get_children(self.discovery_path)
+            if len(current_nodes) >= 2:
+                self.logger.info(f"Discovery quorum already restored to {len(current_nodes)} nodes: {current_nodes}")
+                with self.discovery_recovery_lock:
+                    self.discovery_recovery_in_progress = False
+                return
             
             # Determine which VM's service is down
             vm2_active = any("vm2" in node for node in active_nodes)
@@ -271,6 +319,13 @@ class QuorumMonitor:
                     self.discovery_recovery_in_progress = False
                 return
             
+            # Check if we're shutting down before proceeding with recovery
+            if self.shutting_down:
+                self.logger.info("Aborting recovery because monitor is shutting down")
+                with self.discovery_recovery_lock:
+                    self.discovery_recovery_in_progress = False
+                return
+                
             self.logger.info(f"Recovering discovery node on {target_vm}")
             
             # Get the configuration for the target VM
@@ -285,14 +340,30 @@ class QuorumMonitor:
         except Exception as e:
             self.logger.error(f"Error during discovery recovery: {str(e)}", exc_info=True)
         finally:
-            with self.discovery_recovery_lock:
-                self.discovery_recovery_in_progress = False
-                self.logger.info("Discovery recovery process completed")
+            if not self.shutting_down:
+                with self.discovery_recovery_lock:
+                    self.discovery_recovery_in_progress = False
+                    self.logger.info("Discovery recovery process completed")
     
     def _recover_broker_node(self, active_nodes):
         """Recover a broker node by identifying which one is missing and restarting it"""
+        # Don't proceed with recovery if shutting down
+        if self.shutting_down:
+            self.logger.info("Skipping broker recovery during shutdown")
+            with self.broker_recovery_lock:
+                self.broker_recovery_in_progress = False
+            return
+            
         try:
             self.logger.info(f"Starting broker node recovery. Active nodes: {active_nodes}")
+            
+            # Double-check quorum before proceeding
+            current_nodes = self.zk.get_children(self.broker_path)
+            if len(current_nodes) >= 2:
+                self.logger.info(f"Broker quorum already restored to {len(current_nodes)} nodes: {current_nodes}")
+                with self.broker_recovery_lock:
+                    self.broker_recovery_in_progress = False
+                return
             
             # Determine which VM's service is down by looking for vm4/vm5 in node names
             vm4_active = any("vm4" in node for node in active_nodes)
@@ -317,6 +388,13 @@ class QuorumMonitor:
                     self.broker_recovery_in_progress = False
                 return
             
+            # Check if we're shutting down before proceeding with recovery
+            if self.shutting_down:
+                self.logger.info("Aborting recovery because monitor is shutting down")
+                with self.broker_recovery_lock:
+                    self.broker_recovery_in_progress = False
+                return
+                
             self.logger.info(f"Recovering broker node on {target_vm}")
             
             # Get the configuration for the target VM
@@ -331,18 +409,24 @@ class QuorumMonitor:
         except Exception as e:
             self.logger.error(f"Error during broker recovery: {str(e)}", exc_info=True)
         finally:
-            with self.broker_recovery_lock:
-                self.broker_recovery_in_progress = False
-                self.logger.info("Broker recovery process completed")
+            if not self.shutting_down:
+                with self.broker_recovery_lock:
+                    self.broker_recovery_in_progress = False
+                    self.logger.info("Broker recovery process completed")
     
     def _execute_remote_command(self, ip, command):
         """Execute a command on a remote VM using SSH"""
+        # Don't execute commands if shutting down
+        if self.shutting_down:
+            self.logger.info(f"Skipping remote command execution during shutdown")
+            return
+            
         try:
-            # Make the command run in the background on the remote machine
+            # Add SSH options to avoid host key checking
             background_command = f"nohup {command} > recovery.log 2>&1 &"
             
-            # Use SSH to execute the command
-            ssh_command = f"ssh {ip} '{background_command}'"
+            # Use SSH with options to avoid the host key verification prompt
+            ssh_command = f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {ip} '{background_command}'"
             self.logger.info(f"Executing recovery command on {ip}: {ssh_command}")
             
             # Execute the command
@@ -362,12 +446,17 @@ class QuorumMonitor:
     
     def _wait_for_discovery_quorum(self):
         """Wait for discovery quorum to be restored, with timeout"""
+        # Don't wait if shutting down
+        if self.shutting_down:
+            self.logger.info("Skipping discovery quorum wait during shutdown")
+            return False
+            
         timeout = 60  # seconds
         start_time = time.time()
         
         self.logger.info("Waiting for discovery quorum to be restored...")
         
-        while time.time() - start_time < timeout and self.running:
+        while time.time() - start_time < timeout and self.running and not self.shutting_down:
             try:
                 children = self.zk.get_children(self.discovery_path)
                 self.logger.info(f"Discovery recovery - current node count: {len(children)}, nodes: {children}")
@@ -379,7 +468,7 @@ class QuorumMonitor:
             
             time.sleep(2)
         
-        if not self.running:
+        if not self.running or self.shutting_down:
             self.logger.info("Recovery wait interrupted because monitor is shutting down")
         else:
             self.logger.warning(f"Timed out waiting for discovery quorum to be restored")
@@ -387,12 +476,17 @@ class QuorumMonitor:
     
     def _wait_for_broker_quorum(self):
         """Wait for broker quorum to be restored, with timeout"""
+        # Don't wait if shutting down
+        if self.shutting_down:
+            self.logger.info("Skipping broker quorum wait during shutdown")
+            return False
+            
         timeout = 60  # seconds
         start_time = time.time()
         
         self.logger.info("Waiting for broker quorum to be restored...")
         
-        while time.time() - start_time < timeout and self.running:
+        while time.time() - start_time < timeout and self.running and not self.shutting_down:
             try:
                 children = self.zk.get_children(self.broker_path)
                 self.logger.info(f"Broker recovery - current node count: {len(children)}, nodes: {children}")
@@ -404,7 +498,7 @@ class QuorumMonitor:
             
             time.sleep(2)
         
-        if not self.running:
+        if not self.running or self.shutting_down:
             self.logger.info("Recovery wait interrupted because monitor is shutting down")
         else:
             self.logger.warning(f"Timed out waiting for broker quorum to be restored")
@@ -430,7 +524,7 @@ class QuorumMonitor:
                     check_counter += 1
                     
                     # Every 30 seconds, do a manual check of quorums
-                    if check_counter >= 6:
+                    if check_counter >= 6 and not self.shutting_down:
                         self.logger.info("Performing periodic quorum check")
                         self._check_discovery_quorum()
                         self._check_broker_quorum()
@@ -438,11 +532,13 @@ class QuorumMonitor:
                         
                 except KeyboardInterrupt:
                     self.logger.info("KeyboardInterrupt received in run loop, exiting")
+                    self.shutting_down = True
                     self.running = False
                     break
                 
         except KeyboardInterrupt:
             self.logger.info("Monitor service stopped by user via KeyboardInterrupt")
+            self.shutting_down = True
         except Exception as e:
             self.logger.error(f"Unexpected error in monitor service: {str(e)}", exc_info=True)
             # Log the full traceback for unhandled exceptions
@@ -459,7 +555,8 @@ class QuorumMonitor:
         """Clean up resources"""
         self.logger.info("Starting cleanup process")
         try:
-            # Set running to False to stop any loops
+            # Set shutdown flags to prevent new operations
+            self.shutting_down = True
             self.running = False
             
             # Log all running threads
@@ -482,8 +579,17 @@ class QuorumMonitor:
     def signal_handler(self, sig, frame):
         """Handle termination signals"""
         self.logger.info(f"Received signal {sig}, shutting down")
+        
+        # Set shutdown flags to prevent new operations
+        self.shutting_down = True
         self.running = False
-        # Don't call cleanup here - it will be called in the finally block of run()
+        
+        # Set recovery flags to prevent new recovery attempts during shutdown
+        with self.broker_recovery_lock:
+            self.broker_recovery_in_progress = True  # Prevent new recovery during shutdown
+        
+        with self.discovery_recovery_lock:
+            self.discovery_recovery_in_progress = True  # Prevent new recovery during shutdown
 
 def parse_args():
     """Parse command line arguments"""
