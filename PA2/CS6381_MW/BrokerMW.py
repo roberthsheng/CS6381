@@ -36,14 +36,6 @@ class BrokerMW:
         self.my_election_znode = None # which znode i made for election
         self.is_leader = False
         self.leader_event = threading.Event()
-        # New variables for quorum checking
-        self.quorum_check_interval = 3  # Check every 3 seconds
-        self.last_quorum_check_time = 0
-        self.updates_paused = False
-        self.broker_count = 0
-        self.discovery_count = 0
-        self.discovery_path = "/discovery"
-        self.broker_path = "/brokers"
 
     def configure(self, args):
         try:
@@ -78,13 +70,6 @@ class BrokerMW:
 
             self.logger.info("BrokerMW::configure - watching for discovery changes")
             self.watch_leader()
-            
-            # Register our broker znode
-            self.create_broker_znode()
-            
-            # Ensure paths for discovery and broker nodes exist
-            self._ensure_paths_exist()
-            
             self.logger.info("BrokerMW::configure completed")
         except Exception as e:
             self.logger.error("Exception in BrokerMW::configure: " + str(e))
@@ -361,12 +346,6 @@ class BrokerMW:
                 effective_timeout = timeout if timeout is not None else default_timeout
                 events = dict(self.poller.poll(timeout=effective_timeout))
 
-                # Periodically check quorum if enough time has passed
-                current_time = time.time()
-                if current_time - self.last_quorum_check_time >= self.quorum_check_interval:
-                    self._check_quorum()
-                    self.last_quorum_check_time = current_time
-
                 # Process ZooKeeper events from our internal queue.
                 while not self.zk_event_queue.empty():
                     event_type, data = self.zk_event_queue.get_nowait()
@@ -374,8 +353,6 @@ class BrokerMW:
                     if event_type == "publishers_changed":
                         if self.upcall_obj:
                             self.upcall_obj.handle_publishers_update()
-                    elif event_type == "quorum_check":
-                        self._check_quorum()
 
                 if self.req in events:
                     # Handle reply from the discovery service.
@@ -427,95 +404,49 @@ class BrokerMW:
             raise e
 
     def create_broker_znode(self):
-        """Create the broker znode for this broker instance"""
+        """Create the /broker/primary znode if it does not exist."""
         try:
             self.logger.info("BrokerMW::create_broker_znode")
-            
-            # Ensure parent path exists
-            if not self.zk.exists(self.broker_path):
-                self.zk.create(self.broker_path, b"", makepath=True)
-                self.logger.info(f"Created broker path: {self.broker_path}")
-            
-            # Create ephemeral znode for this broker
-            broker_id = f"broker-{socket.gethostname()}"
-            broker_data = json.dumps({"addr": self.addr, "port": self.port}).encode()
-            broker_znode = f"{self.broker_path}/{broker_id}"
-            
-            if not self.zk.exists(broker_znode):
-                self.zk.create(broker_znode, broker_data, ephemeral=True)
-                self.logger.info(f"Registered broker znode: {broker_znode}")
-            
-            # Set a watch on broker znodes to track quorum
-            self._watch_broker_nodes()
-            
-            # Set a watch on discovery znodes to track quorum
-            self._watch_discovery_nodes()
+            if not self.zk.exists("/broker/primary"):
+                self.zk.create("/broker/primary", value=self.addr.encode(), ephemeral=True, makepath=True)
         except Exception as e:
             self.logger.error("Exception in BrokerMW::create_broker_znode: " + str(e))
             raise e
 
-    def _ensure_paths_exist(self):
-        """Ensure the necessary ZooKeeper paths exist"""
+    def lookup_all_publishers(self):
         try:
-            if not self.zk.exists(self.discovery_path):
-                self.zk.create(self.discovery_path, b"", makepath=True)
-                self.logger.info(f"Created discovery path: {self.discovery_path}")
-                
-            if not self.zk.exists(self.broker_path):
-                self.zk.create(self.broker_path, b"", makepath=True)
-                self.logger.info(f"Created broker path: {self.broker_path}")
+            self.logger.info("BrokerMW::lookup_all_publishers")
+            # Instead of a separate lookup-all request, we use the lookup-by-topic request.
+            # By passing an empty topic list, the discovery service returns all publishers.
+            lookup_req = discovery_pb2.LookupPubByTopicReq()
+            # No topics added: implies "all publishers"
+            disc_req = discovery_pb2.DiscoveryReq()
+            disc_req.msg_type = discovery_pb2.TYPE_LOOKUP_PUB_BY_TOPIC
+            disc_req.lookup_req.CopyFrom(lookup_req)
+            buf2send = disc_req.SerializeToString()
+            self.req.send(buf2send)
         except Exception as e:
-            self.logger.error(f"Exception in BrokerMW::_ensure_paths_exist: {str(e)}")
-            # Non-fatal error, continue execution
+            self.logger.error("Exception in BrokerMW::lookup_all_publishers: " + str(e))
+            raise e
 
-    def _watch_broker_nodes(self):
-        """Set a watch on broker znodes to track the number of brokers"""
-        def broker_watch(children):
-            self.broker_count = len(children)
-            self.logger.debug(f"BrokerMW::_watch_broker_nodes - Broker count: {self.broker_count}")
-            self.zk_event_queue.put(("quorum_check", None))
-            return True  # Keep the watch active
-            
-        self.zk.ChildrenWatch(self.broker_path, broker_watch)
-        
-    def _watch_discovery_nodes(self):
-        """Set a watch on discovery znodes to track the number of discovery nodes"""
-        def discovery_watch(children):
-            self.discovery_count = len(children)
-            self.logger.debug(f"BrokerMW::_watch_discovery_nodes - Discovery count: {self.discovery_count}")
-            self.zk_event_queue.put(("quorum_check", None))
-            return True  # Keep the watch active
-            
-        self.zk.ChildrenWatch(self.discovery_path, discovery_watch)
-        
-    def _check_quorum(self):
-        """Check if we have a quorum of brokers and discovery nodes"""
+    def connect_to_publishers(self, publishers):
         try:
-            broker_quorum = self.broker_count >= 2
-            discovery_quorum = self.discovery_count >= 2
-            quorum_satisfied = broker_quorum and discovery_quorum
-            
-            if self.updates_paused and quorum_satisfied:
-                self.updates_paused = False
-                self.logger.info(f"Resuming updates: brokers={self.broker_count}, discovery={self.discovery_count}")
-            elif not self.updates_paused and not quorum_satisfied:
-                self.updates_paused = True
-                self.logger.info(f"Pausing updates: brokers={self.broker_count}, discovery={self.discovery_count}")
-                
-            return quorum_satisfied
+            self.logger.info("BrokerMW::connect_to_publishers")
+            for pub in publishers:
+                if pub.id in self.connected_publishers:
+                    continue
+                self.connected_publishers.add(pub.id)
+                endpoint = f"tcp://{pub.addr}:{pub.port}"
+                self.sub.connect(endpoint)
+                self.logger.debug(f"BrokerMW::connect_to_publishers - Connected to publisher {pub.id} at {endpoint}")
         except Exception as e:
-            self.logger.error(f"Exception in BrokerMW::_check_quorum: {str(e)}")
-            return False  # Assume no quorum on error to be safe
+            self.logger.error("Exception in BrokerMW::connect_to_publishers: " + str(e))
+            raise e
 
     def disseminate(self, topic, data, old_timestamp, publisher_id):
         try:
             self.logger.debug("BrokerMW::disseminate")
-            
-            # Check if updates are paused due to quorum requirements
-            if self.updates_paused:
-                self.logger.debug(f"BrokerMW::disseminate - Updates paused, not disseminating topic {topic}")
-                return
-            
+
             pub_msg = topic_pb2.Publication()
             pub_msg.publisher_id = "broker"
             pub_msg.topic = topic
@@ -574,33 +505,3 @@ class BrokerMW:
 
     def disable_event_loop(self):
         self.handle_events = False
-
-    def lookup_all_publishers(self):
-        try:
-            self.logger.info("BrokerMW::lookup_all_publishers")
-            # Instead of a separate lookup-all request, we use the lookup-by-topic request.
-            # By passing an empty topic list, the discovery service returns all publishers.
-            lookup_req = discovery_pb2.LookupPubByTopicReq()
-            # No topics added: implies "all publishers"
-            disc_req = discovery_pb2.DiscoveryReq()
-            disc_req.msg_type = discovery_pb2.TYPE_LOOKUP_PUB_BY_TOPIC
-            disc_req.lookup_req.CopyFrom(lookup_req)
-            buf2send = disc_req.SerializeToString()
-            self.req.send(buf2send)
-        except Exception as e:
-            self.logger.error("Exception in BrokerMW::lookup_all_publishers: " + str(e))
-            raise e
-
-    def connect_to_publishers(self, publishers):
-        try:
-            self.logger.info("BrokerMW::connect_to_publishers")
-            for pub in publishers:
-                if pub.id in self.connected_publishers:
-                    continue
-                self.connected_publishers.add(pub.id)
-                endpoint = f"tcp://{pub.addr}:{pub.port}"
-                self.sub.connect(endpoint)
-                self.logger.debug(f"BrokerMW::connect_to_publishers - Connected to publisher {pub.id} at {endpoint}")
-        except Exception as e:
-            self.logger.error("Exception in BrokerMW::connect_to_publishers: " + str(e))
-            raise e

@@ -29,14 +29,12 @@ class DiscoveryMW:
         self.zk_addr = None
         self.election_path = "/discovery_election"
         self.state_path = "/discovery_state"
-        self.discovery_path = "/discovery"  # Path for discovery nodes registration
         self.my_election_znode = None
         self.leader_sequence_num = None
         self.next_leader_candidate_path = None
         self.is_leader = False
         self.address_info = None
         self.leader_event = threading.Event()
-        self.my_discovery_znode = None  # Track our discovery registration znode
 
     def configure(self, args):
         try:
@@ -103,17 +101,6 @@ class DiscoveryMW:
                     self.logger.info(f"Created state path: {self.state_path}")
                 except NodeExistsError:
                     self.logger.warning(f"State path {self.state_path} already exists, likely created concurrently.")
-            
-            # Ensure discovery registration path exists
-            if not self.zk.exists(self.discovery_path):
-                try:
-                    self.zk.create(self.discovery_path, b'', makepath=True)
-                    self.logger.info(f"Created discovery registration path: {self.discovery_path}")
-                except NodeExistsError:
-                    self.logger.warning(f"Discovery path {self.discovery_path} already exists, likely created concurrently.")
-            
-            # Register ourselves as a discovery node
-            self._register_discovery_node()
 
             self._attempt_leader_election()
 
@@ -121,30 +108,6 @@ class DiscoveryMW:
             self.logger.error(f"DiscoveryMW::_init_zk - ZooKeeper initialization failed: {e}")
             # Implement a zk error handler (e.g., retry, exit)
             raise e
-
-    def _register_discovery_node(self):
-        """Register this discovery node under the /discovery path"""
-        try:
-            # Create an ephemeral node for this discovery instance
-            node_id = f"node-{socket.gethostname()}"
-            node_data = json.dumps(self.address_info).encode()
-            node_path = f"{self.discovery_path}/{node_id}"
-            
-            if not self.zk.exists(node_path):
-                self.my_discovery_znode = self.zk.create(node_path, node_data, ephemeral=True)
-                self.logger.info(f"Registered discovery node: {self.my_discovery_znode}")
-            else:
-                self.logger.warning(f"Discovery node {node_path} already exists, possibly duplicate hostname")
-                # Try with a unique suffix
-                for i in range(1, 10):
-                    alt_node_path = f"{self.discovery_path}/{node_id}-{i}"
-                    if not self.zk.exists(alt_node_path):
-                        self.my_discovery_znode = self.zk.create(alt_node_path, node_data, ephemeral=True)
-                        self.logger.info(f"Registered discovery node with alternate name: {self.my_discovery_znode}")
-                        break
-        except Exception as e:
-            self.logger.error(f"DiscoveryMW::_register_discovery_node - Registration failed: {e}")
-            # Non-fatal error, continue with other initialization
 
     def _attempt_leader_election(self):
         """Attempt to become the leader by creating an ephemeral sequential znode."""
@@ -468,12 +431,6 @@ class DiscoveryMW:
                 self.zk.delete(self.my_election_znode)
                 self.logger.info(f"Deleted ephemeral election znode: {self.my_election_znode}")
                 self.my_election_znode = None
-                
-            # Delete the discovery registration znode if it exists
-            if self.my_discovery_znode and self.zk.exists(self.my_discovery_znode):
-                self.zk.delete(self.my_discovery_znode)
-                self.logger.info(f"Deleted discovery registration znode: {self.my_discovery_znode}")
-                self.my_discovery_znode = None
 
             #  Stop the event loop
             self.handle_events = False
