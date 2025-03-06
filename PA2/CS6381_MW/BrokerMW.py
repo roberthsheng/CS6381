@@ -137,19 +137,18 @@ class BrokerMW:
             children = self.zk.get_children(self.broker_election_path)
             children.sort() # Sort to find the lowest sequence number
 
-            self.leader_sequence_num = int(self.my_election_znode.split("_")[-1])
-
-            # pdb.set_trace()
-            if self.my_election_znode == self.broker_election_path + "/" + children[0]: # Check if our znode is the first one
+            # Check if our znode is the first one (leader)
+            if self.my_election_znode == self.broker_election_path + "/" + children[0]:
                 self.logger.info("DiscoveryMW::_check_leadership - I am the leader!")
                 self.become_leader()
+                return True
             else:
                 leader_znode_name = children[0]
                 self.logger.info(f"DiscoveryMW::_check_leadership - I am a replica. Current leader: {leader_znode_name}")
-                leader_seq_num = int(leader_znode_name.split("_")[-1])
-
+                
                 # Find the znode just before ours in sequence
-                my_index = children.index(os.path.basename(self.my_election_znode))
+                my_znode_name = os.path.basename(self.my_election_znode)
+                my_index = children.index(my_znode_name)
                 if my_index > 0:
                     prev_znode_name = children[my_index - 1]
                     self.next_leader_candidate_path = self.broker_election_path + "/" + prev_znode_name
@@ -159,6 +158,7 @@ class BrokerMW:
                     self.next_leader_candidate_path = self.broker_election_path + "/" + leader_znode_name
                     self.logger.debug(f"Watching for deletion of leader: {self.next_leader_candidate_path}")
                     self.zk.exists(self.next_leader_candidate_path, watch=self._leader_watcher)
+                return False
 
         except Exception as e:
             self.logger.error(f"DiscoveryMW::_check_leadership - Error checking leadership: {e}")
@@ -171,7 +171,36 @@ class BrokerMW:
             self.logger.info("DiscoveryMW::become_leader - Transitioning to leader state.")
             self.is_leader = True
             self.leader_event.set()
+            # Create the primary broker znode that publishers will look for
+            self._become_primary_broker()
             # Optionally, perform any other leader-specific initialization here
+
+    def _become_primary_broker(self):
+        """Create the primary broker znode that publishers will watch for"""
+        try:
+            # Ensure /broker exists
+            if not self.zk.exists("/broker"):
+                try:
+                    self.zk.create("/broker", value=b"", makepath=True)
+                except NodeExistsError:
+                    pass
+            
+            # Create or update primary node
+            primary_data = json.dumps({
+                "addr": self.addr, 
+                "port": self.port
+            }).encode()
+            
+            try:
+                if self.zk.exists("/broker/primary"):
+                    self.zk.set("/broker/primary", primary_data)
+                else:
+                    self.zk.create("/broker/primary", value=primary_data, ephemeral=True)
+                self.logger.info(f"Created /broker/primary with {self.addr}:{self.port}")
+            except Exception as e:
+                self.logger.error(f"Error creating primary broker node: {str(e)}")
+        except Exception as e:
+            self.logger.error(f"Exception in BrokerMW::_become_primary_broker: {str(e)}")
 
     def resign_leadership(self): # Optional - for graceful shutdown if needed
         """Actions to perform when resigning leadership (e.g., during shutdown)."""
@@ -193,6 +222,9 @@ class BrokerMW:
                 self.logger.info(f"DiscoveryMW::_leader_watcher - Watched znode {event.path} deleted. Previous leader might have failed.")
                 if not self.is_leader: # Avoid re-election if we are already leader (e.g., due to session timeout)
                     self._attempt_leader_election() # Try to become the leader again
+                    # If we became the leader after election, create primary znode
+                    if self.is_leader:
+                        self._become_primary_broker()
 
             elif event is None: # Initial call of watcher, or node exists
                 exists = self.zk.exists(self.next_leader_candidate_path, watch=self._leader_watcher)
@@ -200,6 +232,9 @@ class BrokerMW:
                     self.logger.info(f"DiscoveryMW::_leader_watcher - Watched znode {self.next_leader_candidate_path} disappeared before callback, attempting leadership.")
                     if not self.is_leader:
                         self._attempt_leader_election()
+                        # If we became the leader after election, create primary znode
+                        if self.is_leader:
+                            self._become_primary_broker()
 
             else:
                 self.logger.debug(f"DiscoveryMW::_leader_watcher - Event: {event}") # Log other events if needed
@@ -532,7 +567,11 @@ class BrokerMW:
     def cleanup(self):
         try:
             self.logger.info("BrokerMW::cleanup")
-            self.resign_leadership()
+            
+            # If we're the leader, resign leadership (which will delete the primary znode)
+            if self.is_leader:
+                self.resign_leadership()
+                
             if self.sub:
                 self.sub.close()
             if self.pub:
