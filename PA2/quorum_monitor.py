@@ -25,18 +25,48 @@ class QuorumMonitor:
     """
     def __init__(self, zk_addr, logger=None):
         self.zk_addr = zk_addr
-        self.logger = logger or logging.getLogger("QuorumMonitor")
         self.zk = None
+        self.running = True
+        self.shutting_down = False
+        
+        # Configure logger
+        if logger is None:
+            self.logger = logging.getLogger("QuorumMonitor")
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO)
+        else:
+            self.logger = logger
+            
+        # ZooKeeper paths
         self.discovery_path = "/discovery"
         self.broker_path = "/brokers"
-        self.discovery_recovery_lock = threading.Lock()
-        self.broker_recovery_lock = threading.Lock()
-        self.discovery_recovery_in_progress = False
+        
+        # Recovery status tracking
         self.broker_recovery_in_progress = False
-        self.running = True
-        self.shutting_down = False  # Flag to indicate shutdown in progress
+        self.discovery_recovery_in_progress = False
+        self.broker_recovery_lock = threading.Lock()
+        self.discovery_recovery_lock = threading.Lock()
+        
+        # Flap detection and stabilization
+        self.broker_state_history = []
+        self.discovery_state_history = []
+        self.flap_window_seconds = 10
+        self.verification_count = 3
+        self.verification_delay_seconds = 2
+        self.stabilization_period = 30  # Wait 30 seconds after detecting a flap before attempting recovery
+        self.last_broker_flap_time = 0
+        self.last_discovery_flap_time = 0
+        
+        # Get hostname for logging
         self.hostname = socket.gethostname()
         self.logger.info(f"Monitor starting on host: {self.hostname}")
+        
+        # Register signal handler
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
         
         # VM configuration for recovery
         self.vm_config = {
@@ -122,93 +152,56 @@ class QuorumMonitor:
         self.logger.info("==============================")
     
     def setup_watches(self):
-        """Setup watches on discovery and broker nodes"""
-        if self.shutting_down:
-            self.logger.info("Skipping watch setup during shutdown")
-            return
-            
+        """Set up watches on discovery and broker nodes"""
         self.logger.info("Setting up watches on discovery and broker nodes")
         
-        try:
-            # Simply list root paths instead of recursive traversal
-            self._list_zk_root()
-            
-            # Check broker path exists before setting up watch
-            if not self.zk.exists(self.broker_path):
-                self.logger.warning(f"Broker path {self.broker_path} does not exist! Creating it now.")
-                self.zk.create(self.broker_path, makepath=True)
-                self.logger.info(f"Created broker path: {self.broker_path}")
-            else:
-                children = self.zk.get_children(self.broker_path)
-                self.logger.info(f"Found broker path with children: {children}")
-            
-            # Direct watch on broker path with explicit callback
-            self.logger.info(f"Setting watch on broker path: {self.broker_path}")
-            
-            def broker_watch_callback(children):
-                try:
-                    if self.shutting_down:
-                        self.logger.info("Ignoring broker watch during shutdown")
-                        return False  # Don't renew watch during shutdown
-                        
-                    self.logger.info(f"*** BROKER WATCH TRIGGERED *** Current nodes: {children}")
-                    # Only check quorum if not already in recovery and not shutting down
-                    if not self.broker_recovery_in_progress and not self.shutting_down:
-                        self._check_broker_quorum()
-                    return True
-                except Exception as e:
-                    self.logger.error(f"Error in broker watch callback: {str(e)}", exc_info=True)
-                    return True
-                    
-            self.broker_watch = self.zk.ChildrenWatch(self.broker_path, broker_watch_callback)
-            self.logger.info("Successfully set up broker watch")
-            
-            # Check discovery path exists before setting up watch
-            if not self.zk.exists(self.discovery_path):
-                self.logger.warning(f"Discovery path {self.discovery_path} does not exist! Creating it now.")
-                self.zk.create(self.discovery_path, makepath=True)
-                self.logger.info(f"Created discovery path: {self.discovery_path}")
-            else:
-                children = self.zk.get_children(self.discovery_path)
-                self.logger.info(f"Found discovery path with children: {children}")
-            
-            # Direct watch on discovery path with explicit callback
-            self.logger.info(f"Setting watch on discovery path: {self.discovery_path}")
-            
-            def discovery_watch_callback(children):
-                try:
-                    if self.shutting_down:
-                        self.logger.info("Ignoring discovery watch during shutdown")
-                        return False  # Don't renew watch during shutdown
-                        
-                    self.logger.info(f"*** DISCOVERY WATCH TRIGGERED *** Current nodes: {children}")
-                    # Only check quorum if not already in recovery and not shutting down
-                    if not self.discovery_recovery_in_progress and not self.shutting_down:
-                        self._check_discovery_quorum()
-                    return True
-                except Exception as e:
-                    self.logger.error(f"Error in discovery watch callback: {str(e)}", exc_info=True)
-                    return True
-                    
-            self.discovery_watch = self.zk.ChildrenWatch(self.discovery_path, discovery_watch_callback)
-            self.logger.info("Successfully set up discovery watch")
-            
-            # Test the watch functionality by doing a manual check
-            self.logger.info("Testing watch functionality...")
-            if not self.shutting_down:
-                self._check_broker_quorum()
-                self._check_discovery_quorum()
-            
-            self.logger.info("Watch setup complete")
+        # Print ZooKeeper structure for debugging
+        self._list_zk_root()
         
+        try:
+            # Discovery path
+            if self.zk.exists(self.discovery_path):
+                children = self.zk.get_children(self.discovery_path)
+                self.logger.info(f"Path {self.discovery_path} exists with children: {children}")
+                
+                # Set up watch on discovery path
+                def discovery_watch_callback(children):
+                    # Only check quorum if not already in recovery and not shutting down
+                    self.logger.info(f"*** DISCOVERY WATCH TRIGGERED *** Current nodes: {children}")
+                    if not self.discovery_recovery_in_progress and not self.shutting_down:
+                        threading.Timer(1.0, self._check_discovery_quorum).start()  # Slight delay to allow stabilization
+                    return True  # Keep the watch active
+                
+                # Set up ChildrenWatch on discovery path
+                self.discovery_watch = self.zk.ChildrenWatch(self.discovery_path, discovery_watch_callback)
+                self.logger.info(f"Successfully set up discovery watch")
+            else:
+                self.logger.error(f"Discovery path {self.discovery_path} does not exist")
+                
+            # Broker path
+            if self.zk.exists(self.broker_path):
+                children = self.zk.get_children(self.broker_path)
+                self.logger.info(f"Path {self.broker_path} exists with children: {children}")
+                
+                # Set up watch on broker path
+                def broker_watch_callback(children):
+                    # Only check quorum if not already in recovery and not shutting down
+                    self.logger.info(f"*** BROKER WATCH TRIGGERED *** Current nodes: {children}")
+                    if not self.broker_recovery_in_progress and not self.shutting_down:
+                        threading.Timer(1.0, self._check_broker_quorum).start()  # Slight delay to allow stabilization
+                    return True  # Keep the watch active
+                
+                # Set up ChildrenWatch on broker path
+                self.broker_watch = self.zk.ChildrenWatch(self.broker_path, broker_watch_callback)
+                self.logger.info(f"Successfully set up broker watch")
+            else:
+                self.logger.error(f"Broker path {self.broker_path} does not exist")
+                
         except Exception as e:
             self.logger.error(f"Error setting up watches: {str(e)}", exc_info=True)
-            tb = traceback.format_exc()
-            self.logger.error(f"Traceback: {tb}")
     
     def _check_discovery_quorum(self):
         """Check if discovery quorum is maintained and initiate recovery if needed"""
-        # Don't check if shutting down
         if self.shutting_down:
             self.logger.info("Skipping discovery quorum check during shutdown")
             return
@@ -217,11 +210,52 @@ class QuorumMonitor:
             children = self.zk.get_children(self.discovery_path)
             self.logger.info(f"Checking discovery quorum: Current nodes ({len(children)}): {children}")
             
+            # Record state for flap detection
+            current_time = time.time()
+            self.discovery_state_history.append((current_time, len(children), children))
+            
+            # Remove old history entries
+            self.discovery_state_history = [entry for entry in self.discovery_state_history 
+                                           if current_time - entry[0] <= self.flap_window_seconds]
+            
+            # Check for flapping (rapid changes in node count)
+            if self._detect_flapping(self.discovery_state_history):
+                self.last_discovery_flap_time = current_time
+                self.logger.warning(f"Discovery node flapping detected! Waiting for stabilization.")
+                return
+                
+            # Don't attempt recovery if too soon after flapping
+            if current_time - self.last_discovery_flap_time < self.stabilization_period:
+                self.logger.info(f"In stabilization period after flapping. Skipping recovery check.")
+                return
+            
             if len(children) < 2:
-                self.logger.warning(f"Discovery quorum lost! Only {len(children)} nodes active")
+                self.logger.warning(f"Potential discovery quorum loss! Only {len(children)} nodes active")
+                
+                # Perform multiple verification checks with delay
+                verified_loss = True
+                for i in range(self.verification_count):
+                    if self.shutting_down:
+                        return
+                        
+                    time.sleep(self.verification_delay_seconds)
+                    verify_children = self.zk.get_children(self.discovery_path)
+                    self.logger.info(f"Verification check {i+1}/{self.verification_count}: {len(verify_children)} discovery nodes")
+                    
+                    if len(verify_children) >= 2:
+                        self.logger.info(f"Discovery quorum restored during verification. No recovery needed.")
+                        verified_loss = False
+                        break
+                
+                if not verified_loss:
+                    return
+                    
+                # Still below quorum after all verification checks
+                self.logger.warning(f"Confirmed discovery quorum loss after {self.verification_count} verification checks")
+                
                 with self.discovery_recovery_lock:
                     if not self.discovery_recovery_in_progress and not self.shutting_down:
-                        self.logger.warning("Starting discovery recovery process")
+                        self.logger.warning(f"Starting discovery recovery process")
                         self.discovery_recovery_in_progress = True
                         recovery_thread = threading.Thread(
                             target=self._recover_discovery_node, 
@@ -249,31 +283,52 @@ class QuorumMonitor:
             children = self.zk.get_children(self.broker_path)
             self.logger.info(f"Current broker nodes ({len(children)}): {children}")
             
-            if len(children) < 2:
-                self.logger.warning(f"Potential broker quorum loss detected! Only {len(children)} nodes active: {children}")
+            # Record state for flap detection
+            current_time = time.time()
+            self.broker_state_history.append((current_time, len(children), children))
+            
+            # Remove old history entries
+            self.broker_state_history = [entry for entry in self.broker_state_history 
+                                        if current_time - entry[0] <= self.flap_window_seconds]
+            
+            # Check for flapping (rapid changes in node count)
+            if self._detect_flapping(self.broker_state_history):
+                self.last_broker_flap_time = current_time
+                self.logger.warning(f"Broker node flapping detected! Waiting for stabilization.")
+                return
                 
-                # Perform multiple verification checks with delay to confirm it's not a temporary glitch
-                verification_count = 3
-                for i in range(verification_count):
-                    time.sleep(2)  # Wait 2 seconds between checks
-                    
-                    # Skip if shutting down
+            # Don't attempt recovery if too soon after flapping
+            if current_time - self.last_broker_flap_time < self.stabilization_period:
+                self.logger.info(f"In stabilization period after flapping. Skipping recovery check.")
+                return
+            
+            if len(children) < 2:
+                self.logger.warning(f"Potential broker quorum loss! Only {len(children)} nodes active")
+                
+                # Perform multiple verification checks with delay
+                verified_loss = True
+                for i in range(self.verification_count):
                     if self.shutting_down:
                         return
                         
+                    time.sleep(self.verification_delay_seconds)
                     verify_children = self.zk.get_children(self.broker_path)
-                    self.logger.info(f"Verification check {i+1}/{verification_count}: {len(verify_children)} broker nodes")
+                    self.logger.info(f"Verification check {i+1}/{self.verification_count}: {len(verify_children)} broker nodes")
                     
                     if len(verify_children) >= 2:
                         self.logger.info(f"Broker quorum restored during verification. No recovery needed.")
-                        return
+                        verified_loss = False
+                        break
                 
+                if not verified_loss:
+                    return
+                    
                 # Still below quorum after all verification checks
-                self.logger.warning(f"Confirmed broker quorum loss after {verification_count} verification checks")
+                self.logger.warning(f"Confirmed broker quorum loss after {self.verification_count} verification checks")
                 
                 with self.broker_recovery_lock:
                     if not self.broker_recovery_in_progress and not self.shutting_down:
-                        self.logger.warning(f"Initiating broker recovery process")
+                        self.logger.warning(f"Starting broker recovery process")
                         self.broker_recovery_in_progress = True
                         recovery_thread = threading.Thread(
                             target=self._recover_broker_node, 
@@ -289,6 +344,27 @@ class QuorumMonitor:
                 self.logger.info(f"Broker quorum OK: {len(children)} nodes active")
         except Exception as e:
             self.logger.error(f"Error checking broker quorum: {str(e)}", exc_info=True)
+    
+    def _detect_flapping(self, state_history):
+        """Detect if nodes are flapping (rapidly changing state)"""
+        if len(state_history) < 3:
+            return False
+            
+        # Count state changes within our window
+        changes = 0
+        previous_count = state_history[0][1]
+        
+        for entry in state_history[1:]:
+            if entry[1] != previous_count:
+                changes += 1
+                previous_count = entry[1]
+                
+        # If we've seen more than 2 changes in our window, that's flapping
+        if changes >= 2:
+            self.logger.warning(f"Detected {changes} state changes in the last {self.flap_window_seconds} seconds")
+            return True
+            
+        return False
     
     def _recover_discovery_node(self, active_nodes):
         """Recover a discovery node by identifying which one is missing and restarting it"""
@@ -519,10 +595,6 @@ class QuorumMonitor:
     def run(self):
         """Main loop for the quorum monitor"""
         try:
-            # Set up signal handlers
-            signal.signal(signal.SIGINT, self.signal_handler)
-            signal.signal(signal.SIGTERM, self.signal_handler)
-            
             self.connect()
             self.setup_watches()
             
