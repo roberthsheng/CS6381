@@ -6,6 +6,8 @@ import socket
 from CS6381_MW import discovery_pb2, topic_pb2
 from kazoo.client import KazooClient, NodeExistsError, NoNodeError
 import json 
+import threading
+from collections import deque, defaultdict
 
 class BrokerMW:
     def __init__(self, logger):
@@ -25,6 +27,9 @@ class BrokerMW:
 
             self.port = args.port
             self.addr = socket.gethostbyname(socket.gethostname())
+
+            self.size = args.size
+            self.history = defaultdict(deque)
 
             self.broker_path = "/brokers"
             self.publisher_path = "/publishers"
@@ -48,9 +53,20 @@ class BrokerMW:
             bind_str = f"tcp://{args.addr}:{args.port}"  # you will need to read this from config.ini
             self.pub.bind(bind_str)
 
+            # a socket for history requests
+            self.history_port = int(self.port) + 1  # or read from config
+            self.history_rep = context.socket(zmq.REP)
+            history_bind_str = f"tcp://{args.addr}:{self.history_port}"
+            self.history_rep.bind(history_bind_str)
+            self.logger.info(f"BrokerMW::configure - History REP socket bound to {history_bind_str}")
+
             # Create poller
             self.poller = zmq.Poller()
             self.poller.register(self.sub, zmq.POLLIN)
+
+            # In your configure() or after configure(), start the history service thread:
+            self.history_thread = threading.Thread(target=self.history_service, daemon=True)
+            self.history_thread.start()
 
             self.logger.info("BrokerMW::configure completed")
         except Exception as e:
@@ -100,7 +116,7 @@ class BrokerMW:
                 "subscribers": 0
             }
             broker_data = json.dumps(broker_info).encode("utf-8")
-            broker_znode = f"node_"
+            broker_znode = f"/brokers/node_"
             
             if not self.zk.exists(broker_znode):
                 self.zk.create(broker_znode, broker_data, ephemeral=True, sequence=True)
@@ -215,6 +231,9 @@ class BrokerMW:
             pub_msg.publisher_id = publisher_id  # ensure the same id is used
             pub_msg.topic = topic
             pub_msg.data = data
+            self.history[topic].append(data)
+            if len(self.history[topic]) > self.size:
+                self.history[topic].popleft()
             pub_msg.timestamp = old_timestamp
             buf2send = pub_msg.SerializeToString()
             self.pub.send_multipart([topic.encode("utf-8"), buf2send])
@@ -254,3 +273,32 @@ class BrokerMW:
         except Exception as e:
             self.logger.error(f"Error during cleanup: {str(e)}")
             raise e
+
+    def handle_history_request(self):
+        """
+        Waits for a join request and replies with the history for the requested topics.
+        The join request can be a JSON string with a field 'topics' that is a list.
+        """
+        try:
+            request = self.history_rep.recv_string()
+            self.logger.info(f"BrokerMW::handle_history_request - Received join request: {request}")
+            req_data = json.loads(request)
+            topics = req_data.get("topics", [])
+            history_data = {}
+            for topic in topics:
+                # Convert deque to list so it can be JSON-encoded.
+                history_data[topic] = list(self.history[topic])
+            response = json.dumps(history_data)
+            self.history_rep.send_string(response)
+            self.logger.info("BrokerMW::handle_history_request - Sent history to subscriber")
+        except Exception as e:
+            self.logger.error(f"Error handling history request: {e}")
+
+    def history_service(self):
+        while self.handle_events:
+            try:
+                # This call blocks until a request is received.
+                self.handle_history_request()
+            except Exception as e:
+                self.logger.error(f"Error in history service: {e}")
+

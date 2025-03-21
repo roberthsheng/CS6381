@@ -264,6 +264,24 @@ class SubscriberAppln:
                 for topic in self.topiclist:
                     self.mw_obj.sub.setsockopt_string(zmq.SUBSCRIBE, topic)
                     self.logger.debug(f"Subscribed to topic: {topic}")
+
+                # After connecting to the broker's PUB socket, create a new REQ socket:
+                history_req = self.mw_obj.req.context.socket(zmq.REQ)
+                # Assume the broker's history port is broker_port+1, which can be provided by the load balancer or known by convention.
+                # For this example, we assume it’s provided in the broker info as 'history_port'
+                history_connect_str = f"tcp://{broker_info['addr']}:{broker_info.get('history_port', int(broker_info['port'])+1)}"
+                history_req.connect(history_connect_str)
+                self.logger.info(f"Subscriber connected to broker history service at {history_connect_str}")
+
+                # Send a join request containing the topics of interest:
+                join_request = json.dumps({"topics": self.topiclist})
+                history_req.send_string(join_request)
+                history_response = history_req.recv_string()
+                self.logger.info(f"Received history from broker: {history_response}")
+                # Process the received history (e.g., log it, store it, or display it)
+                history_data = json.loads(history_response)
+                # (Optional) Do something with history_data here
+                history_req.close()
                 self.state = self.State.LISTENING
                 return 0
             elif self.state == self.State.LISTENING:

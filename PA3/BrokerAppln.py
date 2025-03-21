@@ -8,7 +8,6 @@ from enum import Enum
 from CS6381_MW.BrokerMW import BrokerMW
 from CS6381_MW import discovery_pb2
 
-
 class BrokerAppln:
     class State(Enum):
         INITIALIZE = 0
@@ -119,6 +118,8 @@ def parseCmdLineArgs():
                         help="Broker's bind address (default: 0.0.0.0)")
     parser.add_argument("-p", "--port", type=int, default=5560,
                         help="Broker's publish port (default: 5560)") 
+
+    parser.add_argument("-s", "--size", default=10)
 
     parser.add_argument("-z", "--zk_addr", default="localhost:2181",
                         help="ZooKeeper address for broker watch")
