@@ -124,10 +124,6 @@ class SubscriberMW:
                     # Timeout occurred, let application decide what to do
                     timeout = self.upcall_obj.invoke_operation()
 
-                elif self.req in events:
-                    # Handle reply from discovery service
-                    timeout = self.handle_discovery_reply()
-
                 elif self.sub in events:
                     # Handle incoming publication
                     timeout = self.handle_publication()
@@ -143,77 +139,6 @@ class SubscriberMW:
 
         except Exception as e:
             raise e
-
-    def register(self, name, topics):
-        try:
-            self.logger.info("SubscriberMW::register")
-
-            # Create register request
-            register_req = discovery_pb2.RegisterReq()
-            register_req.role = discovery_pb2.ROLE_SUBSCRIBER
-
-            # Add registrant info
-            reg_info = discovery_pb2.RegistrantInfo()
-            reg_info.id = name
-            register_req.info.CopyFrom(reg_info)
-            register_req.topiclist.extend(topics)
-
-            # Create discovery request
-            disc_req = discovery_pb2.DiscoveryReq()
-            disc_req.msg_type = discovery_pb2.TYPE_REGISTER
-            disc_req.register_req.CopyFrom(register_req)
-
-            # Serialize and send
-            buf2send = disc_req.SerializeToString()
-            self.req.send(buf2send)
-
-        except Exception as e:
-            raise e
-
-    def lookup_publishers(self, topics):
-        try:
-            self.logger.info("SubscriberMW::lookup_publishers")
-
-            # Create lookup request
-            lookup_req = discovery_pb2.LookupPubByTopicReq()
-            lookup_req.topiclist.extend(topics)
-
-            # Create discovery request
-            disc_req = discovery_pb2.DiscoveryReq()
-            disc_req.msg_type = discovery_pb2.TYPE_LOOKUP_PUB_BY_TOPIC
-            disc_req.lookup_req.CopyFrom(lookup_req)
-
-            # Serialize and send
-            buf2send = disc_req.SerializeToString()
-            self.req.send(buf2send)
-
-        except Exception as e:
-            raise e
-
-    def handle_discovery_reply(self):
-        try:
-            self.logger.info("SubscriberMW::handle_discovery_reply")
-
-            # Receive and deserialize reply
-            reply_bytes = self.req.recv()
-            disc_resp = discovery_pb2.DiscoveryResp()
-            disc_resp.ParseFromString(reply_bytes)
-
-            # Handle different response types
-            if disc_resp.msg_type == discovery_pb2.TYPE_REGISTER:
-                timeout = self.upcall_obj.register_response(disc_resp.register_resp)
-            elif disc_resp.msg_type == discovery_pb2.TYPE_LOOKUP_PUB_BY_TOPIC:
-                timeout = self.upcall_obj.lookup_response(disc_resp.lookup_resp)
-            elif disc_resp.msg_type == discovery_pb2.TYPE_ISREADY:
-                timeout = self.upcall_obj.isready_response(disc_resp.isready_resp)
-            else:
-                raise ValueError("Unknown response type")
-
-            return timeout
-
-        except Exception as e:
-            raise e
-
 
     def handle_publication(self):
         try:
@@ -248,25 +173,6 @@ class SubscriberMW:
 
         except Exception as e:
             raise e
-
-    def is_ready(self):
-        try:
-            self.logger.info("SubscriberMW::is_ready")
-            # Create isready request
-            isready_req = discovery_pb2.IsReadyReq()
-
-            # Create discovery request
-            disc_req = discovery_pb2.DiscoveryReq()
-            disc_req.msg_type = discovery_pb2.TYPE_ISREADY
-            disc_req.isready_req.CopyFrom(isready_req)
-
-            # Serialize and send the request
-            buf2send = disc_req.SerializeToString()
-            self.req.send(buf2send)
-        except Exception as e:
-            self.logger.error(f"SubscriberMW::is_ready - Exception: {str(e)}")
-            raise e
-
 
     def connect_to_publishers(self, publishers, topics):
         try:

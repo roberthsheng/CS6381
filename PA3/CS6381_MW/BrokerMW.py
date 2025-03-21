@@ -30,6 +30,7 @@ class BrokerMW:
             self.publisher_path = "/publishers"
             self.zk_addr = args.zk_addr
             self._init_zk()
+            self.create_broker_znode()
             self.connected_publishers = set()
 
             # 
@@ -91,14 +92,20 @@ class BrokerMW:
                 self.zk.create(self.broker_path, b"", makepath=True)
                 self.logger.info(f"Created broker path: {self.broker_path}")
             
-            # Create ephemeral znode for this broker
             broker_id = f"broker-{socket.gethostname()}"
-            broker_data = json.dumps({"addr": self.addr, "port": self.port}).encode()
-            broker_znode = f"{self.broker_path}/{broker_id}"
+            # Include a subscriber count initialized to 0
+            broker_info = {
+                "addr": self.addr,
+                "port": self.port,
+                "subscribers": 0
+            }
+            broker_data = json.dumps(broker_info).encode("utf-8")
+            broker_znode = f"node_"
             
             if not self.zk.exists(broker_znode):
-                self.zk.create(broker_znode, broker_data, ephemeral=True)
+                self.zk.create(broker_znode, broker_data, ephemeral=True, sequence=True)
                 self.logger.info(f"Registered broker znode: {broker_znode}")
+
         except Exception as e:
             self.logger.error("Exception in BrokerMW::create_broker_znode")
             raise e
