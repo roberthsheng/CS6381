@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discovery
+  namespace: pubsub-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: discovery
+  template:
+    metadata:
+      labels:
+        app: discovery
+    spec:
+      containers:
+        - name: discovery
+          image: ghcr.io/d-zg/pubsub:latest
+          command: ["python3", "DiscoveryAppln.py"]
+          args:
+            - "-a"
+            - "0.0.0.0"
+            - "-c"
+            - "/config/config.ini"
+            - "-P"
+            - "50"
+            - "-S"
+            - "50"
+            - "-p"
+            - "5555"
+            - "-l"
+            - "10"
+          ports:
+            - containerPort: 5555
+          volumeMounts:
+            - name: config-volume
+              mountPath: /config
+      volumes:
+        - name: config-volume
+          configMap:
+            name: pubsub-config

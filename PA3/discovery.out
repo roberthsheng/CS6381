@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/home/cc/CS6381/PA1/DiscoveryAppln.py", line 14, in <module>
+    from DiscoveryMW import DiscoveryMW
+  File "/home/cc/CS6381/PA1/DiscoveryMW.py", line 11, in <module>
+    import zmq
+ModuleNotFoundError: No module named 'zmq'
