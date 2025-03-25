@@ -24,3 +24,5 @@ For PA3:
 
 For comparison, PA1:
 ![Latency Graph PA1](pa1plot.png)
+
+Doesn't seem to be a significant change. The slight increase in latency can probably be attributed to the fact that the broker now checks to see if a publisher has the strongest strength before broadcasting its message to the subscribers. 
