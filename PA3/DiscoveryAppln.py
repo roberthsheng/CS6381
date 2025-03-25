@@ -53,9 +53,6 @@ class DiscoveryAppln:
             self.expected_publishers = args.publishers
             self.expected_subscribers = args.subscribers
 
-            self.logger.info(
-                f"DiscoveryAppln::Expected publishers: {self.expected_publishers}, subscribers: {self.expected_subscribers}"
-            )
 
             self.logger.info("DiscoveryAppln::configure completed")
 
