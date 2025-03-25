@@ -23,4 +23,4 @@ For PA3:
 ![Latency Graph PA3](plotpa3.png)
 
 For comparison, PA1:
-![Latency Graph PA1](Screenshot 2025-03-25 at 15-55-42 Untitled presentation - Google Slides.png)
+![Latency Graph PA1](pa1plot.png)
