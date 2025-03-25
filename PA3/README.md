@@ -1,23 +1,23 @@
 # Testing Results
 
-Across all the configurations we tested, we had:
+**Components:**
+- 3 Discovery Services
+- 3 Brokers
+- 1 Load Balancer
+- 1 Zookeeper instance
 
-3 Discovery Services
-3 Brokers
-1 Load Balancer
-1 Zookeeper instance
+> The 3 discovery services, 3 brokers, and 1 load balancer were all deployed on different VMs.
 
-The 3 discovery services, 3 brokers, and 1 load balancer were all deployed on different VMs. 
+**Test Variations:**
+- 2 subscribers, 2 publishers
+- 5 subscribers, 5 publishers
+- 10 subscribers, 10 publishers
 
-We varied the number of susbcribers and publishers in our testing:
+**Results:**
+- 2 publishers, 2 subscribers: 5.61 milliseconds
+- 5 publishers, 5 subscribers: 6.33 milliseconds
+- 10 publishers, 10 subscribers: 7.84 milliseconds
 
-2 subscribers, 2 publishers
-5 subscribers, 5 publishers
-10 subscribers, 10 publishers.
+**Graphs**
 
-We got the following results:
-
-2 pub, 2 sub: 5.61 milliseconds
-5 pub, 5 sub: 6.33 milliseconds
-10 pub, 10 sub: 7.84 milliseconds. 
-
+![Latency Graph PA3](plotpa3.png)
