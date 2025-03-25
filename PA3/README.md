@@ -6,7 +6,7 @@
 - 1 Load Balancer
 - 1 Zookeeper instance
 
-> The 3 discovery services, 3 brokers, and 1 load balancer were all deployed on different VMs.
+> The 3 discovery services, 3 brokers, and 1 load balancer were all deployed on different VMs. We measured using influxDB, end to end measurements were taken at the subscriber, where publishers would include time of publishing when they sent out messages, so results are subject to clock drift. 
 
 **Test Variations:**
 - 2 subscribers, 2 publishers
@@ -19,5 +19,8 @@
 - 10 publishers, 10 subscribers: 7.84 milliseconds
 
 **Graphs**
-
+For PA3:
 ![Latency Graph PA3](plotpa3.png)
+
+For comparison, PA1:
+![Latency Graph PA1](
