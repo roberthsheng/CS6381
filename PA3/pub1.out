@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/home/cc/CS6381/PA1/PublisherAppln.py", line 58, in <module>
+    from CS6381_MW.PublisherMW import PublisherMW
+  File "/home/cc/CS6381/PA1/CS6381_MW/PublisherMW.py", line 11, in <module>
+    import zmq
+ModuleNotFoundError: No module named 'zmq'
