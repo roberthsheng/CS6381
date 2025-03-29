@@ -1,126 +1,104 @@
-# Distributed Pub/Sub System with Centralized Discovery (Milestone 1)
+# Programming Assignment 2 - Fault-Tolerant Pub/Sub System
+CS6381 Distributed Systems - Spring 2024
 
-This project implements a distributed publish-subscribe system with a centralized discovery service using ZeroMQ (ZMQ) middleware.
+## Overview
+This programming assignment extends our publish-subscribe system from PA1 by implementing fault tolerance and recovery mechanisms using ZooKeeper. The system now includes leader election for discovery services and broker recovery, making it resilient to failures while maintaining message delivery.
 
-## System Architecture
+## Architecture
+- Discovery Service: Implements leader election using ZooKeeper
+- Broker: Supports fault tolerance with primary-backup replication
+- Publishers: Connect to active broker for message dissemination
+- Subscribers: Automatically reconnect to new broker upon failure
+- ZooKeeper: Manages coordination and failure detection
 
-The system consists of three main components:
+## Performance Analysis
+We compared the performance between PA1 (baseline) and PA2 (fault-tolerant) implementations, focusing on the broker-based dissemination strategy. Here are the key findings, when removing the 10% of messages from each end to account for outliers:
 
-1. **Discovery Service**
-   - Centralized registry for publishers and subscribers
-   - Tracks registration status of all entities
-   - Provides readiness status when system is fully registered
+### Latency Comparison
+                     Average Latency (ms)
+      PA1 (ViaBroker):     5.973735817341364
+      PA2 (ViaBroker):     2.373320895522388
 
-2. **Publishers**
-   - Register with discovery service
-   - Publish on specific topics
-   - Support direct dissemination to subscribers
+### Message Throughput
+               Message Count
+         PA1:     35,695
+         PA2:     13,401
 
-3. **Subscribers** 
-   - Register with discovery service
-   - Subscribe to topics of interest
-   - Receive publications from matching publishers
+### Latency Distribution
+            Min (ms)    Max (ms)    Avg (ms)
+      PA1:     2           13         5.97
+      PA2:     2            4         2.37
 
-## Directory Structure
+PA1 shows consistent performance with moderate variability (2-13ms range)
+PA2 exhibits:
+- Similar minimum latency (2ms) but better average performance
+- Lower maximum latency (4ms vs 13ms) during normal operation
+- More consistent latency overall
 
-```
-.
-├── CS6381_MW/                 # Middleware implementation
-│   ├── __init__.py
-│   ├── discovery_pb2.py      # Generated protobuf code
-│   ├── PublisherMW.py        # Publisher middleware
-│   └── topic_pb2.py          # Topic protobuf code
-├── config.ini                # System configuration
-├── DiscoveryAppln.py        # Discovery service application
-├── DiscoveryMW.py           # Discovery middleware
-├── discovery.proto          # Discovery service protocol
-├── PublisherAppln.py        # Publisher application
-├── SubscriberAppln.py       # Subscriber application  
-├── SubscriberMW.py          # Subscriber middleware
-├── test_pubsub.py          # Test harness
-├── topic.proto             # Topic protocol
-└── topic_selector.py       # Topic selection utility
-```
+## Impact of Recovery and Coordination
+### Latency Overhead:
+Average latency improved in PA2 (2.37ms vs 5.97ms in PA1)
+- Demonstrates successful optimization of coordination mechanisms
+- More efficient message handling and delivery paths
 
-## Installation Requirements
+### Throughput Impact:
+62.4% reduction in message throughput (13,401 vs 35,695 messages)
+- Expected trade-off for fault tolerance capabilities
+- Recovery coordination reduces overall message processing capacity
 
-```bash
-# Install ZMQ
-sudo pip3 install pyzmq
+### System Stability:
+- Maximum latency of 4ms shows improved stability
+- Minimum latency of 2ms matches PA1 baseline performance
+- Narrower latency range (2-4ms) indicates more predictable operation
 
-# Install protobuf
-sudo pip3 install protobuf
+## Conclusions
+### Performance Trade-offs:
+- Fault tolerance mechanisms maintain good latency characteristics
+- System achieves reliability without severe latency penalties
+- Recovery capabilities integrated with minimal performance impact
 
-# Install Mininet (if not already installed)
-sudo apt-get install mininet
-```
+### System Reliability:
+- Successfully handles failure scenarios
+- Maintains message delivery despite component failures
+- Automatic recovery without manual intervention
 
-## Testing with Mininet
+### Design Implications:
+- Well-suited for systems requiring both reliability and performance
+- Viable for moderately latency-sensitive applications
+- Demonstrates successful balance of reliability and performance
 
-Start a simple topology with 5 hosts:
-```bash
-sudo mn --topo=single,5
-```
+## Future Improvements
+### Latency Optimization:
+- Further optimize ZooKeeper interaction patterns
+- Implement more efficient state synchronization
+- Investigate opportunities for parallel processing
 
-In the Mininet CLI, start components:
-```bash
-# Start Discovery Service on h1
-h1 python3 DiscoveryAppln.py -P 2 -S 2 -p 5555 -l 20 &
+### Throughput Enhancement:
+- Batch processing during stable operation
+- Optimize broker handover procedures
+- Investigate message compression techniques
 
-# Start Publishers on h2 and h3
-h2 python3 PublisherAppln.py -n pub1 -d h1:5555 -p 5556 -T 2 -l 20 &
-h3 python3 PublisherAppln.py -n pub2 -d h1:5555 -p 5557 -T 2 -l 20 &
+### Monitoring and Debugging:
+- Add detailed performance metrics
+- Implement better failure tracking
+- Enhanced logging for recovery events
 
-# Start Subscribers on h4 and h5
-h4 python3 SubscriberAppln.py -n sub1 -d h1:5555 -T 2 -l 20 &
-h5 python3 SubscriberAppln.py -n sub2 -d h1:5555 -T 2 -l 20 &
-```
+## Requirements
+- Python 3.8+
+- ZooKeeper 3.7+
+- InfluxDB for metrics collection
+- ZeroMQ for messaging
+- Protocol Buffers for serialization
 
-## Command Line Arguments
+### Configuration
+- Broker settings in config.ini
+- ZooKeeper connection parameters
+- Recovery timeouts and thresholds
+- Logging levels and destinations
 
-### Discovery Application
-- `-P, --publishers`: Expected number of publishers
-- `-S, --subscribers`: Expected number of subscribers  
-- `-p, --port`: Port number for discovery service
-- `-l, --loglevel`: Logging level (10=DEBUG, 20=INFO)
-
-### Publisher Application
-- `-n, --name`: Publisher name
-- `-d, --discovery`: Discovery service address
-- `-p, --port`: Publisher port number
-- `-T, --num_topics`: Number of topics to publish
-- `-l, --loglevel`: Logging level
-
-### Subscriber Application  
-- `-n, --name`: Subscriber name
-- `-d, --discovery`: Discovery service address
-- `-T, --num_topics`: Number of topics to subscribe
-- `-l, --loglevel`: Logging level
-
-## Configuration
-
-The system behavior is configured through `config.ini`:
-
-```ini
-[Discovery]
-Strategy=Centralized
-
-[Dissemination]
-Strategy=Direct
-```
-
-## Current Status (Milestone 1)
-
-Completed features:
-- ✅ Discovery application and middleware implementation
-- ✅ Subscriber application and middleware implementation
-- ✅ Centralized registration system
-- ✅ Publisher/Subscriber registration with discovery service
-- ✅ System readiness status from discovery service
-- ✅ Testing on Mininet network topology
-
-Todo:
-- Direct dissemination implementation (Milestone 2)
-- Broker-based dissemination (Milestone 3)
-- Performance measurements
-- Analytics and visualization
+### Running the System
+- Start ZooKeeper ensemble
+- Launch Discovery Service
+- Start Primary and Backup Brokers
+- Deploy Publishers and Subscribers
+- Monitor through InfluxDB dashboard
