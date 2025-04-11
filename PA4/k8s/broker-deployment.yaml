@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broker
+  namespace: pubsub-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: broker
+  template:
+    metadata:
+      labels:
+        app: broker
+    spec:
+      containers:
+        - name: broker
+          image: ghcr.io/d-zg/pubsub:latest
+          command: ["python3", "BrokerAppln.py"]
+          args:
+            - "-n"
+            - "broker"
+            - "-d"
+            - "discovery-svc:5555"
+            - "-c"
+            - "/config/config.ini"
+            - "-a"
+            - "0.0.0.0"
+            - "-p"
+            - "5560"
+            - "-l"
+            - "10"
+          ports:
+            - containerPort: 5560
+          volumeMounts:
+            - name: config-volume
+              mountPath: /config
+      volumes:
+        - name: config-volume
+          configMap:
+            name: pubsub-config
