@@ -21,6 +21,7 @@
 **Graphs**
 
 PA4: 
+![image](https://github.com/user-attachments/assets/cd0d122d-b749-46ef-9322-1e43f3736e3e)
 
 For comparison PA3:
 ![Latency Graph PA3](plotpa3.png)
