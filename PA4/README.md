@@ -14,15 +14,17 @@
 - 10 subscribers, 10 publishers
 
 **Results:**
-- 2 publishers, 2 subscribers: 5.61 milliseconds
-- 5 publishers, 5 subscribers: 6.33 milliseconds
-- 10 publishers, 10 subscribers: 7.84 milliseconds
+- 2 publishers, 2 subscribers: 6.22 milliseconds
+- 5 publishers, 5 subscribers: 6.71 milliseconds
+- 10 publishers, 10 subscribers: 8.52 milliseconds
 
 **Graphs**
-For PA3:
+
+PA4: 
+
+For comparison PA3:
 ![Latency Graph PA3](plotpa3.png)
 
-For comparison, PA1:
-![Latency Graph PA1](pa1plot.png)
 
-Doesn't seem to be a significant change. The slight increase in latency can probably be attributed to the fact that the broker now checks to see if a publisher has the strongest strength before broadcasting its message to the subscribers. 
+
+Not a significant change from our PA3 results. We implemented most of the features before the spec was changed for PA3, the only additional feature was the deadline QoS. This new feature wouldn't be expected to add latency to the vast majority of messages, which come before the deadline anyway, so I think the results are fairly expected. 
